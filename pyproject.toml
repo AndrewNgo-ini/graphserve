@@ -1,0 +1,46 @@
+[project]
+name = "graphserve"
+version = "0.1.0"
+description = "Serve any LangGraph graph over the OpenAI Chat Completions + Responses APIs."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "AndrewNgo-ini", email = "46411807+AndrewNgo-ini@users.noreply.github.com" }]
+keywords = ["langgraph", "openai", "fastapi", "llm", "agents", "responses-api", "chat-completions", "sse"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Framework :: FastAPI",
+]
+dependencies = [
+    "fastapi>=0.137.0",
+    "langgraph>=1.2.0",
+    "langchain-core>=1.4.0",
+    "openai>=2.41.0",
+    "pydantic>=2.13.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.25", "httpx>=0.28", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/AndrewNgo-ini/graphserve"
+Repository = "https://github.com/AndrewNgo-ini/graphserve"
+Issues = "https://github.com/AndrewNgo-ini/graphserve/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/graphserve"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

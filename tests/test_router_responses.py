@@ -1,0 +1,110 @@
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from graphserve import GraphRegistry, GraphConfig, create_openai_router
+from tests.fakes import echo_graph
+
+
+
+
+def _client():
+    reg = GraphRegistry()
+    reg.register("medical", GraphConfig(graph=echo_graph()))
+    app = FastAPI()
+    app.include_router(create_openai_router(reg), prefix="/v1")
+    return TestClient(app)
+
+
+def test_models_lists_registered():
+    r = _client().get("/v1/models")
+    assert r.status_code == 200
+    assert "medical" in [m["id"] for m in r.json()["data"]]
+
+
+def test_non_streaming_response():
+    r = _client().post("/v1/responses", json={"model": "medical", "input": "hi", "stream": False})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["object"] == "response" and body["model"] == "medical"
+    assert any(i["type"] == "message" for i in body["output"])
+
+
+def test_streaming_response_sse():
+    with _client().stream("POST", "/v1/responses", json={"model": "medical", "input": "hi", "stream": True}) as r:
+        assert r.status_code == 200
+        body = "".join(r.iter_text())
+    assert "event: response.created" in body
+    assert "event: response.completed" in body
+
+
+def test_conversation_anchor():
+    """POSTing with conversation=<prior id> continues the same thread without error."""
+    client = _client()
+    # Create an initial response to get an id.
+    r1 = client.post("/v1/responses", json={"model": "medical", "input": "hello", "stream": False})
+    assert r1.status_code == 200
+    prior_id = r1.json()["id"]
+
+    # Continue using the `conversation` field instead of `previous_response_id`.
+    r2 = client.post(
+        "/v1/responses",
+        json={"model": "medical", "input": "follow-up", "stream": False, "conversation": prior_id},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["object"] == "response"
+
+
+def test_structured_block_input():
+    """Structured input list with content blocks must be text-extracted, not repr'd."""
+    payload = {
+        "model": "medical",
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+        "stream": False,
+    }
+    r = _client().post("/v1/responses", json=payload)
+    assert r.status_code == 200
+    body = r.json()
+    # The echo graph echoes the last human message text.
+    # If structured input was repr'd the output would contain "[{" not "echo: hi".
+    output_texts = [
+        part["text"]
+        for item in body["output"]
+        if item["type"] == "message"
+        for part in item.get("content", [])
+        if part.get("type") == "output_text"
+    ]
+    assert any("echo: hi" in t for t in output_texts), (
+        f"Expected 'echo: hi' in output_texts but got: {output_texts}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# metadata field tests
+# ---------------------------------------------------------------------------
+
+def test_responses_metadata_accepted_and_reaches_context_factory():
+    """A responses request with metadata is accepted (200) and context_factory receives it."""
+    captured: dict = {}
+
+    reg = GraphRegistry()
+    reg.register(
+        "meta-resp-model",
+        GraphConfig(
+            graph=echo_graph(),
+            context_factory=lambda req: captured.update(req.metadata or {}),
+        ),
+    )
+    app = FastAPI()
+    app.include_router(create_openai_router(reg), prefix="/v1")
+    client = TestClient(app)
+
+    r = client.post(
+        "/v1/responses",
+        json={
+            "model": "meta-resp-model",
+            "input": "hello",
+            "stream": False,
+            "metadata": {"patient_id": "P-12345", "session": "abc"},
+        },
+    )
+    assert r.status_code == 200
+    assert captured == {"patient_id": "P-12345", "session": "abc"}
