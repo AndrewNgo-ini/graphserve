@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from graphserve import GraphRegistry, GraphConfig, create_openai_router
-from tests.fakes import echo_graph
+from tests.fakes import echo_graph, echo_graph_with_checkpointer
 
 
 
@@ -75,6 +75,52 @@ def test_structured_block_input():
     assert any("echo: hi" in t for t in output_texts), (
         f"Expected 'echo: hi' in output_texts but got: {output_texts}"
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /responses/{id}/input_items
+# ---------------------------------------------------------------------------
+
+def _ckpt_client():
+    reg = GraphRegistry()
+    reg.register("medical", GraphConfig(graph=echo_graph_with_checkpointer()))
+    app = FastAPI()
+    app.include_router(create_openai_router(reg), prefix="/v1")
+    return TestClient(app)
+
+
+def test_input_items_lists_conversation():
+    """GET /responses/{id}/input_items returns the conversation's items as a list object."""
+    client = _ckpt_client()
+    r1 = client.post("/v1/responses", json={"model": "medical", "input": "hi", "stream": False})
+    resp_id = r1.json()["id"]
+
+    r = client.get(f"/v1/responses/{resp_id}/input_items")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["object"] == "list"
+    assert any(i.get("role") == "user" for i in body["data"])
+    assert body["first_id"] == body["data"][0]["id"]
+    assert body["last_id"] == body["data"][-1]["id"]
+    assert body["has_more"] is False
+
+
+def test_input_items_limit_sets_has_more():
+    client = _ckpt_client()
+    resp_id = client.post(
+        "/v1/responses", json={"model": "medical", "input": "hi", "stream": False}
+    ).json()["id"]
+
+    r = client.get(f"/v1/responses/{resp_id}/input_items", params={"limit": 1})
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["data"]) == 1
+    assert body["has_more"] is True
+
+
+def test_input_items_unknown_id_404():
+    r = _ckpt_client().get("/v1/responses/resp_not-a-real-id/input_items")
+    assert r.status_code == 404
 
 
 # ---------------------------------------------------------------------------

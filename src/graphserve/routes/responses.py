@@ -13,7 +13,13 @@ from graphserve._ids import format_conv_id, parse_conv_id
 from graphserve.errors import openai_error_body
 from graphserve.persistence import ConversationNotFoundError, ConversationStore
 from graphserve.registry import GraphRegistry, UnknownModelError
-from graphserve.translate import encode_sse, emit_response_sse, extract_text, messages_to_response_dict
+from graphserve.translate import (
+    encode_sse,
+    emit_response_sse,
+    extract_text,
+    lc_messages_to_openai_items,
+    messages_to_response_dict,
+)
 
 
 class ResponseCreateRequest(BaseModel):
@@ -178,6 +184,50 @@ def build_responses_router(
             model=conv.model,
             created_at=conv.created_at,
         )
+
+    @router.get("/responses/{response_id}/input_items")
+    async def list_response_input_items(response_id: str, limit: int = 100):
+        try:
+            conv_uuid = parse_conv_id(response_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=openai_error_body(
+                    f"Response {response_id!r} not found",
+                    type="invalid_request_error",
+                    code="response_not_found",
+                ),
+            ) from exc
+
+        try:
+            conv = await store.get(conv_uuid)
+        except ConversationNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=openai_error_body(
+                    f"Response {response_id!r} not found",
+                    type="invalid_request_error",
+                    code="response_not_found",
+                ),
+            ) from exc
+
+        # Replay thread state from the checkpointer (same source as get_response).
+        cfg = registry.resolve(conv.model)
+        graph = await cfg.resolve_graph()
+        try:
+            state = await graph.aget_state({"configurable": {"thread_id": str(conv_uuid)}})
+            messages = state.values.get("messages", []) if state and state.values else []
+        except ValueError:
+            messages = []
+
+        items = lc_messages_to_openai_items(messages)[:limit]
+        return {
+            "object": "list",
+            "data": items,
+            "first_id": items[0]["id"] if items else None,
+            "last_id": items[-1]["id"] if items else None,
+            "has_more": len(items) == limit,
+        }
 
     @router.delete("/responses/{response_id}")
     async def delete_response(response_id: str):
