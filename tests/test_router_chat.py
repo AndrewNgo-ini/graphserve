@@ -34,27 +34,39 @@ def test_chat_streaming():
     assert "data: " in body and "[DONE]" in body
 
 
-def test_chat_non_streaming_output_to_text():
-    """output_to_text callable is applied to the full result dict in non-streaming mode."""
+def test_chat_non_streaming_returns_last_message_text():
+    """The last state message's text becomes the completion content.
+
+    A return_direct-style trailing ToolMessage is surfaced as the response,
+    with no per-graph output hook.
+    """
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    class FakeGraph:
+        async def ainvoke(self, graph_input, config=None, context=None):
+            return {"messages": [
+                HumanMessage(content="summarize"),
+                AIMessage(content="", tool_calls=[{
+                    "id": "c1", "name": "summarize_medical_history",
+                    "args": {}, "type": "tool_call",
+                }]),
+                ToolMessage(content='{"khoa": "Khoa Noi"}', tool_call_id="c1",
+                            name="summarize_medical_history"),
+            ]}
+
     reg = GraphRegistry()
-    reg.register(
-        "custom",
-        GraphConfig(
-            graph=echo_graph(),
-            output_to_text=lambda out: "CUSTOM:" + out["messages"][-1].content,
-        ),
-    )
+    reg.register("custom", GraphConfig(graph=FakeGraph()))
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     client = TestClient(app)
 
     r = client.post(
         "/v1/chat/completions",
-        json={"model": "custom", "messages": [{"role": "user", "content": "hi"}]},
+        json={"model": "custom", "messages": [{"role": "user", "content": "summarize"}]},
     )
     assert r.status_code == 200
     content = r.json()["choices"][0]["message"]["content"]
-    assert content == "CUSTOM:echo: hi"
+    assert content == '{"khoa": "Khoa Noi"}'
 
 
 # ---------------------------------------------------------------------------

@@ -191,6 +191,19 @@ def _lc_messages_to_items(messages: list[BaseMessage]) -> list[dict[str, Any]]:
 # Public API
 # ---------------------------------------------------------------------------
 
+def result_to_text(result: Any) -> str:
+    """Extract the response text from a LangGraph result dict.
+
+    Uses the LAST message's text content. This is correct for a normal turn
+    (trailing assistant message) and for ``return_direct`` tools (trailing
+    tool message whose content IS the response).
+    """
+    messages = result.get("messages", []) if isinstance(result, dict) else []
+    if not messages:
+        return ""
+    return extract_text(messages[-1].content)
+
+
 def request_to_context(request: Any) -> dict | None:
     """Build LangGraph runtime context from an OpenAI request, generically.
 

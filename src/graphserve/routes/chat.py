@@ -1,7 +1,6 @@
 """OpenAI Chat Completions API route handler."""
 from __future__ import annotations
 
-import inspect
 import json
 import time
 from typing import Any
@@ -15,14 +14,7 @@ from pydantic import BaseModel
 
 from graphserve.errors import openai_error_body
 from graphserve.registry import GraphRegistry, UnknownModelError
-from graphserve.translate import chat_completion_chunks, extract_text, request_to_context
-
-
-async def _maybe_await(value: Any) -> Any:
-    """Await *value* if it is awaitable, otherwise return it as-is."""
-    if inspect.isawaitable(value):
-        return await value
-    return value
+from graphserve.translate import chat_completion_chunks, request_to_context, result_to_text
 
 
 def _openai_tool_calls(message: AIMessage | None) -> list[dict]:
@@ -134,19 +126,14 @@ def build_chat_router(
         # 6b. Non-streaming path
         result = await graph.ainvoke(graph_input, config=run_config, context=context)
 
-        # Extract last AI message
-        messages = result.get("messages", [])
-        last_ai: AIMessage | None = None
-        for msg in reversed(messages):
-            if isinstance(msg, AIMessage):
-                last_ai = msg
-                break
+        messages = result.get("messages", []) if isinstance(result, dict) else []
+        text = result_to_text(result)
 
-        if cfg.output_to_text is not None:
-            text = await _maybe_await(cfg.output_to_text(result))
-        else:
-            text = extract_text(last_ai.content) if last_ai is not None else ""
-
+        # Surface a pending tool call only when the LAST message is an AIMessage
+        # requesting one (a return_direct tool already executed -> trailing
+        # ToolMessage -> no pending call).
+        last = messages[-1] if messages else None
+        last_ai = last if isinstance(last, AIMessage) else None
         tool_calls = _openai_tool_calls(last_ai)
         message: dict[str, Any] = {
             "role": "assistant",
