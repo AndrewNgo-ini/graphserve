@@ -17,6 +17,8 @@ from openai.types.chat.chat_completion_chunk import (
     ChatCompletionChunk,
     Choice as ChunkChoice,
     ChoiceDelta,
+    ChoiceDeltaToolCall,
+    ChoiceDeltaToolCallFunction,
 )
 from openai.types.responses import (
     ResponseCompletedEvent,
@@ -697,33 +699,54 @@ async def chat_completion_chunks(
     )
     yield f"data: {role_chunk.model_dump_json()}\n\n".encode()
 
-    # Per-token content chunks
-    async for msg_chunk, _metadata in message_stream:
-        if not isinstance(msg_chunk, AIMessageChunk):
-            continue
-        if not msg_chunk.content:
-            continue
-        text_content = extract_text(msg_chunk.content)
-        if not text_content:
-            continue
-        content_chunk = ChatCompletionChunk(
+    def _chunk(delta: ChoiceDelta, finish_reason: str | None = None) -> bytes:
+        chunk = ChatCompletionChunk(
             id=completion_id,
             object="chat.completion.chunk",
             created=created,
             model=model,
-            choices=[ChunkChoice(index=0, delta=ChoiceDelta(content=text_content), finish_reason=None)],
+            choices=[ChunkChoice(index=0, delta=delta, finish_reason=finish_reason)],
         )
-        yield f"data: {content_chunk.model_dump_json()}\n\n".encode()
+        return f"data: {chunk.model_dump_json()}\n\n".encode()
 
-    # Final chunk with finish_reason
-    stop_chunk = ChatCompletionChunk(
-        id=completion_id,
-        object="chat.completion.chunk",
-        created=created,
-        model=model,
-        choices=[ChunkChoice(index=0, delta=ChoiceDelta(), finish_reason="stop")],
-    )
-    yield f"data: {stop_chunk.model_dump_json()}\n\n".encode()
+    # Per-chunk content + tool-call deltas
+    saw_tool_call = False
+    tool_index: dict[str, int] = {}
+    next_index = 0
+    async for msg_chunk, _metadata in message_stream:
+        if not isinstance(msg_chunk, AIMessageChunk):
+            continue
+
+        text_content = extract_text(msg_chunk.content) if msg_chunk.content else ""
+        if text_content:
+            yield _chunk(ChoiceDelta(content=text_content))
+
+        for tcc in getattr(msg_chunk, "tool_call_chunks", None) or []:
+            saw_tool_call = True
+            # OpenAI deltas correlate fragments by a stable integer index. Use the
+            # chunk's own index when present; otherwise assign one per call id.
+            idx = tcc.get("index")
+            if idx is None:
+                key = tcc.get("id") or f"_pos{next_index}"
+                idx = tool_index.setdefault(key, next_index)
+                if idx == next_index:
+                    next_index += 1
+            else:
+                next_index = max(next_index, idx + 1)
+            call_id = tcc.get("id")
+            yield _chunk(ChoiceDelta(tool_calls=[ChoiceDeltaToolCall(
+                index=idx,
+                id=call_id or None,
+                # id+type appear on the first fragment for an index, args thereafter.
+                type="function" if call_id else None,
+                function=ChoiceDeltaToolCallFunction(
+                    name=tcc.get("name") or None,
+                    arguments=tcc.get("args") or "",
+                ),
+            )]))
+
+    # Final chunk: tool_calls turns finish with "tool_calls", text turns with "stop".
+    yield _chunk(ChoiceDelta(), finish_reason="tool_calls" if saw_tool_call else "stop")
 
     # SSE terminator
     yield b"data: [DONE]\n\n"

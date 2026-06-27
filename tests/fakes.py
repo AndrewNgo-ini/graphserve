@@ -169,6 +169,47 @@ def plain_text_llm_graph():
     return g.compile()
 
 
+def tool_call_graph():
+    """Graph whose node returns an AIMessage carrying a tool call (non-streaming).
+
+    Exercises the Chat Completions non-streaming tool-call path: the assistant
+    message must surface ``tool_calls`` with finish_reason ``tool_calls``.
+    """
+    def respond(state: State) -> State:
+        return {"messages": [AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "get_weather",
+                "args": {"city": "Hanoi"},
+                "id": "call_abc",
+                "type": "tool_call",
+            }],
+        )]}
+    g = StateGraph(State)
+    g.add_node("respond", respond)
+    g.add_edge(START, "respond")
+    g.add_edge("respond", END)
+    return g.compile()
+
+
+def streaming_tool_call_graph():
+    """Graph whose node *streams* a tool-calling model so tool_call_chunks flow
+    through stream_mode='messages' — exercises Chat Completions streaming tool calls."""
+    model = FakeToolThenTextModel()
+
+    async def call_llm(state: State) -> State:
+        final: AIMessageChunk | None = None
+        async for chunk in model.astream(state["messages"]):
+            final = chunk if final is None else final + chunk
+        return {"messages": [final]}
+
+    g = StateGraph(State)
+    g.add_node("call_llm", call_llm)
+    g.add_edge(START, "call_llm")
+    g.add_edge("call_llm", END)
+    return g.compile()
+
+
 def streaming_text_graph():
     """Graph whose node *streams* the model so stream_mode='messages' surfaces tokens.
 

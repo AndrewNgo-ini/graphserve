@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import time
 from typing import Any
 from uuid import uuid4
@@ -22,6 +23,27 @@ async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+def _openai_tool_calls(message: AIMessage | None) -> list[dict]:
+    """Map a LangChain AIMessage's tool_calls to OpenAI chat tool_calls dicts.
+
+    OpenAI requires ``function.arguments`` as a JSON string and a tool-call
+    ``id``; LangChain stores args as a dict and the id may be absent.
+    """
+    if message is None:
+        return []
+    calls = []
+    for tc in getattr(message, "tool_calls", None) or []:
+        calls.append({
+            "id": tc.get("id") or f"call_{uuid4().hex[:24]}",
+            "type": "function",
+            "function": {
+                "name": tc.get("name", ""),
+                "arguments": json.dumps(tc.get("args") or {}),
+            },
+        })
+    return calls
 
 
 class ChatCompletionRequest(BaseModel):
@@ -124,6 +146,15 @@ def build_chat_router(
         else:
             text = extract_text(last_ai.content) if last_ai is not None else ""
 
+        tool_calls = _openai_tool_calls(last_ai)
+        message: dict[str, Any] = {
+            "role": "assistant",
+            # OpenAI sets content null on a tool-call turn with no text.
+            "content": text or (None if tool_calls else ""),
+        }
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+
         return {
             "id": completion_id,
             "object": "chat.completion",
@@ -132,11 +163,8 @@ def build_chat_router(
             "choices": [
                 {
                     "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": text,
-                    },
-                    "finish_reason": "stop",
+                    "message": message,
+                    "finish_reason": "tool_calls" if tool_calls else "stop",
                 }
             ],
             "usage": {

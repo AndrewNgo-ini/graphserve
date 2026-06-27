@@ -27,7 +27,13 @@ from openai.types.responses import (
 )
 
 from graphserve import GraphConfig, GraphRegistry, create_openai_router
-from tests.fakes import plain_text_llm_graph, streaming_text_graph, tool_then_text_graph
+from tests.fakes import (
+    plain_text_llm_graph,
+    streaming_text_graph,
+    streaming_tool_call_graph,
+    tool_call_graph,
+    tool_then_text_graph,
+)
 
 
 @asynccontextmanager
@@ -118,3 +124,42 @@ async def test_chat_completions_streaming_parses():
     text = "".join(c.choices[0].delta.content or "" for c in chunks)
     assert text == "hello world"
     assert chunks[-1].choices[0].finish_reason == "stop"
+
+
+async def test_chat_completions_nonstreaming_tool_call_parses():
+    async with sdk_client("toolcall", tool_call_graph()) as client:
+        cc = await client.chat.completions.create(
+            model="toolcall", messages=[{"role": "user", "content": "weather?"}]
+        )
+    msg = cc.choices[0].message
+    assert cc.choices[0].finish_reason == "tool_calls"
+    assert msg.tool_calls is not None and len(msg.tool_calls) == 1
+    call = msg.tool_calls[0]
+    assert call.type == "function"
+    assert call.id == "call_abc"
+    assert call.function.name == "get_weather"
+    assert json.loads(call.function.arguments) == {"city": "Hanoi"}
+
+
+async def test_chat_completions_streaming_tool_call_parses():
+    async with sdk_client("stream-tool", streaming_tool_call_graph()) as client:
+        stream = await client.chat.completions.create(
+            model="stream-tool", messages=[{"role": "user", "content": "weather?"}], stream=True
+        )
+        chunks = [chunk async for chunk in stream]
+
+    # Reassemble the streamed tool call exactly as an OpenAI client would.
+    name, args, call_id = "", "", None
+    for c in chunks:
+        for tc in c.choices[0].delta.tool_calls or []:
+            assert tc.index == 0
+            if tc.id:
+                call_id = tc.id
+            if tc.function and tc.function.name:
+                name = tc.function.name
+            if tc.function and tc.function.arguments:
+                args += tc.function.arguments
+    assert call_id == "call_1"
+    assert name == "lookup"
+    assert json.loads(args) == {"q": "x"}
+    assert chunks[-1].choices[0].finish_reason == "tool_calls"
