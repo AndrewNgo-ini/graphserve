@@ -16,6 +16,7 @@ def create_openai_router(
     *,
     store: ConversationStore | None = None,
     auth: Callable | None = None,
+    callbacks: Callable[[], list] | None = None,
 ) -> APIRouter:
     """Build an APIRouter with OpenAI-compatible /models and /responses routes.
 
@@ -27,6 +28,9 @@ def create_openai_router(
         Optional conversation store. Defaults to a fresh ``InMemoryConversationStore``.
     auth:
         Optional callable used as a FastAPI dependency on the router.
+    callbacks:
+        Optional zero-arg provider invoked per request to produce a fresh
+        LangChain callbacks list (e.g. a per-request tracing handler).
 
     Notes
     -----
@@ -46,9 +50,9 @@ def create_openai_router(
         }
 
     # Include the Responses API sub-router.
-    router.include_router(build_responses_router(registry, store, auth))
+    router.include_router(build_responses_router(registry, store, auth, callbacks))
 
     # Include the Chat Completions sub-router (Task 11).
-    router.include_router(build_chat_router(registry, auth))
+    router.include_router(build_chat_router(registry, auth, callbacks))
 
     return router

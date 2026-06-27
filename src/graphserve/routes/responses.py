@@ -59,6 +59,7 @@ def build_responses_router(
     registry: GraphRegistry,
     store: ConversationStore,
     auth: Any | None,
+    callbacks: Any | None = None,
 ) -> APIRouter:
     """Build the /responses sub-router (private — called by create_openai_router)."""
     router = APIRouter()
@@ -105,14 +106,14 @@ def build_responses_router(
         else:
             graph_input = {"messages": _input_to_messages(request.input)}
 
-        # 5. Build context and callbacks
+        # 5. Build context
         context = request_to_context(request)
-        callbacks = cfg.callbacks_factory(request) if cfg.callbacks_factory else None
 
         # 6. Build LangGraph config
         run_config: dict = {"configurable": {"thread_id": str(conv.id)}}
-        if callbacks:
-            run_config["callbacks"] = callbacks
+        cb_list = callbacks() if callbacks else None
+        if cb_list:
+            run_config["callbacks"] = cb_list
 
         resp_id = format_conv_id(conv.id)
 

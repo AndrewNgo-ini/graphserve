@@ -57,6 +57,7 @@ class ChatCompletionRequest(BaseModel):
 def build_chat_router(
     registry: GraphRegistry,
     auth: Any | None,
+    callbacks: Any | None = None,
 ) -> APIRouter:
     """Build the /chat/completions sub-router (private — called by create_openai_router)."""
     router = APIRouter()
@@ -86,17 +87,17 @@ def build_chat_router(
             lc_messages = convert_to_messages(request.messages)
             graph_input = {"messages": lc_messages}
 
-        # 4. Build context and callbacks
+        # 4. Build context
         context = request_to_context(request)
-        callbacks = cfg.callbacks_factory(request) if cfg.callbacks_factory else None
 
         # 5. Build LangGraph config — use conversation_id from metadata as thread_id if provided,
         #    otherwise fall back to a fresh uuid (stateless per-request).
         conv_id = (request.metadata or {}).get("conversation_id")
         thread_id = str(conv_id) if conv_id else uuid4().hex
         run_config: dict = {"configurable": {"thread_id": thread_id}}
-        if callbacks:
-            run_config["callbacks"] = callbacks
+        cb_list = callbacks() if callbacks else None
+        if cb_list:
+            run_config["callbacks"] = cb_list
 
         completion_id = f"chatcmpl-{uuid4().hex}"
         created = int(time.time())
