@@ -475,13 +475,14 @@ async def emit_response_sse_from_astream(
     yield builder.event("response.in_progress", response=builder.response("in_progress"))
 
     try:
+        import sys
         current_message = _OutputItemState(
             item_id=_new_item_id("msg"),
             output_index=-1,
             item_type="message",
         )
 
-        logger.info(f"Starting astream with config={config}, context={context}")
+        print("ASTREAM_START", file=sys.stderr, flush=True)
         event_count = 0
         async for event in graph.astream(
             graph_input,
@@ -492,7 +493,7 @@ async def emit_response_sse_from_astream(
             version="v2",
         ):
             event_count += 1
-            logger.info(f"astream event {event_count}: type={event.get('type')}")
+            print(f"EVENT[{event_count}]: {event.get('type')}", file=sys.stderr, flush=True)
             if event.get("type") != "messages":
                 continue
 
@@ -592,7 +593,7 @@ async def emit_response_sse_from_astream(
                 item=item,
             )
 
-        logger.info(f"astream completed after {event_count} events")
+        print(f"ASTREAM_END: {event_count} events", file=sys.stderr, flush=True)
         yield builder.event(
             "response.completed",
             response=builder.response("completed"),
