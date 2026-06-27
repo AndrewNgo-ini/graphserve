@@ -123,6 +123,7 @@ def build_responses_router(
                 config=run_config,
                 version="v2",
                 context=context,
+                subgraphs=True,
             )
             sse_stream = emit_response_sse(
                 events,
