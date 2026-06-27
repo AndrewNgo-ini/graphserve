@@ -476,11 +476,13 @@ async def emit_response_sse_from_astream(
 
     try:
         import sys
+        print("AFTER_IMPORT", file=sys.stderr, flush=True)
         current_message = _OutputItemState(
             item_id=_new_item_id("msg"),
             output_index=-1,
             item_type="message",
         )
+        print("AFTER_STATE", file=sys.stderr, flush=True)
 
         print("ASTREAM_START", file=sys.stderr, flush=True)
         event_count = 0
