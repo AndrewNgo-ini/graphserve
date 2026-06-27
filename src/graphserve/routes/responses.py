@@ -101,10 +101,7 @@ def build_responses_router(
         graph = cfg.graph
 
         # 4. Build input
-        if cfg.request_to_input is not None:
-            graph_input = cfg.request_to_input(request)
-        else:
-            graph_input = {"messages": _input_to_messages(request.input)}
+        graph_input = {"messages": _input_to_messages(request.input)}
 
         # 5. Build context
         context = request_to_context(request)

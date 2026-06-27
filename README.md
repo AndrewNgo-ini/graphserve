@@ -44,7 +44,7 @@ Your app now exposes:
 | Export | Description |
 |---|---|
 | `GraphRegistry` | Registry mapping model names to graph configs |
-| `GraphConfig` | Configuration for a single graph (graph, factories, hooks) |
+| `GraphConfig` | Holds a single already-compiled `graph` to serve (graph-only) |
 | `create_openai_router` | Builds a FastAPI `APIRouter` with all OpenAI-compatible routes |
 | `ConversationStore` | Protocol for plugging in a custom conversation metadata backend |
 
@@ -55,8 +55,14 @@ create_openai_router(
     registry,          # GraphRegistry — required
     store=None,        # ConversationStore — defaults to InMemoryConversationStore
     auth=None,         # FastAPI dependency for authentication
+    callbacks=None,    # Callable[[], list] — per-request callbacks provider (e.g. tracing)
 )
 ```
+
+Per-request runtime context is derived generically from the OpenAI request and
+exposed to the graph as LangGraph runtime `context`: `user` → `context["user_id"]`,
+`instructions` → `context["metadata"]["custom_instructions"]`, and `metadata` is
+passed through as `context["metadata"]`. Graphs read what they need and ignore the rest.
 
 > **Stateful GET / `previous_response_id` continuity** requires the registered
 > graph to be compiled with a LangGraph checkpointer — this is the consumer's

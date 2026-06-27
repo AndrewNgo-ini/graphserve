@@ -1,5 +1,12 @@
+import dataclasses
+
 import pytest
 from graphserve.registry import GraphRegistry, GraphConfig, UnknownModelError
+
+
+def test_graphconfig_is_graph_only():
+    fields = {f.name for f in dataclasses.fields(GraphConfig)}
+    assert fields == {"graph"}
 
 def test_register_and_resolve():
     reg = GraphRegistry()

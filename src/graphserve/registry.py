@@ -1,6 +1,5 @@
 """Declarative graph registration. No auto-discovery, no inheritance."""
 from __future__ import annotations
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,14 +10,15 @@ class UnknownModelError(KeyError):
 
 @dataclass
 class GraphConfig:
-    """A compiled graph plus the adapters needed to serve it.
+    """An already-compiled graph to serve.
 
     ``graph`` must be an already-compiled graph — GraphServe never constructs
-    it. Build/compile the graph in your application and pass it in.
+    it. Build/compile the graph in your application and pass it in. Per-request
+    concerns (runtime context, callbacks, output extraction) are handled
+    generically by GraphServe, not per graph.
     """
 
     graph: Any
-    request_to_input: Callable[..., dict] | None = None
 
 
 class GraphRegistry:

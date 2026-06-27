@@ -73,11 +73,7 @@ def build_chat_router(
         graph = cfg.graph
 
         # 3. Build input from messages
-        if cfg.request_to_input is not None:
-            graph_input = cfg.request_to_input(request)
-        else:
-            lc_messages = convert_to_messages(request.messages)
-            graph_input = {"messages": lc_messages}
+        graph_input = {"messages": convert_to_messages(request.messages)}
 
         # 4. Build context
         context = request_to_context(request)
