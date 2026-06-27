@@ -502,11 +502,11 @@ async def emit_response_sse(
                     continue
 
                 # Filter by streamable_node_names if configured
-                # if streamable_node_names:
-                #     metadata = event.get("metadata", {})
-                #     node_name = metadata.get("langgraph_node")
-                #     if node_name not in streamable_node_names:
-                #         continue
+                if streamable_node_names:
+                    metadata = event.get("metadata", {})
+                    node_name = metadata.get("langgraph_node")
+                    if node_name not in streamable_node_names:
+                        continue
 
                 # Forward native reasoning (vLLM enable_thinking) as a dedicated
                 # event so clients can show "thinking". Check multiple locations:
