@@ -16,6 +16,7 @@ from graphserve.registry import GraphRegistry, UnknownModelError
 from graphserve.translate import (
     encode_sse,
     emit_response_sse,
+    emit_response_sse_from_astream,
     extract_text,
     lc_messages_to_openai_items,
     messages_to_response_dict,
@@ -118,19 +119,15 @@ def build_responses_router(
 
         # 7a. Streaming path
         if request.stream:
-            events = graph.astream_events(
+            sse_stream = emit_response_sse_from_astream(
+                graph,
                 graph_input,
                 config=run_config,
-                version="v2",
                 context=context,
-                subgraphs=True,
-            )
-            sse_stream = emit_response_sse(
-                events,
+                streamable_node_names=cfg.streamable_node_names,
                 resp_id=resp_id,
                 model=request.model,
                 created_at=conv.created_at,
-                streamable_node_names=cfg.streamable_node_names,
             )
             return StreamingResponse(
                 encode_sse(sse_stream),

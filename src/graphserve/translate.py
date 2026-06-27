@@ -448,6 +448,159 @@ async def encode_sse(
         yield _event_to_bytes(event)
 
 
+async def emit_response_sse_from_astream(
+    graph: Any,
+    graph_input: dict[str, Any],
+    *,
+    config: dict[str, Any],
+    context: dict[str, Any] | None,
+    streamable_node_names: list[str] | None,
+    resp_id: str,
+    model: str,
+    created_at: int,
+) -> AsyncIterator[ServerSentEvent]:
+    """Stream using astream instead of astream_events.
+
+    Uses astream with stream_mode=["messages"] to get AIMessageChunk updates,
+    then converts them to Responses API SSE format.
+    """
+    from langchain_core.messages import AIMessageChunk
+
+    builder = _ResponseEventBuilder(resp_id=resp_id, model=model, created_at=created_at)
+    current_message: _OutputItemState | None = None
+
+    yield builder.event("response.created", response=builder.response("in_progress"))
+    yield builder.event("response.in_progress", response=builder.response("in_progress"))
+
+    try:
+        current_message = _OutputItemState(
+            item_id=_new_item_id("msg"),
+            output_index=-1,
+            item_type="message",
+        )
+
+        async for event in graph.astream(
+            graph_input,
+            config=config,
+            context=context,
+            stream_mode=["messages"],
+            subgraphs=True,
+            version="v2",
+        ):
+            if event.get("type") != "messages":
+                continue
+
+            message, metadata = event["data"]
+            if not isinstance(message, AIMessageChunk):
+                continue
+
+            # Filter by streamable node names
+            if streamable_node_names:
+                node_name = metadata.get("langgraph_node")
+                if node_name not in streamable_node_names:
+                    continue
+
+            # Extract reasoning if present
+            extra = getattr(message, "additional_kwargs", None)
+            reasoning = ""
+            if isinstance(extra, dict):
+                reasoning = extra.get("reasoning_content") or extra.get("reasoning") or ""
+
+            if not reasoning:
+                content = getattr(message, "content", None)
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "thinking":
+                            reasoning = block.get("text", "")
+                            break
+
+            if reasoning and current_message:
+                yield builder.event(
+                    "response.reasoning_text.delta",
+                    item_id=current_message.item_id,
+                    delta=reasoning,
+                )
+
+            # Extract text
+            text = _chunk_text(message)
+            if text and current_message is not None:
+                # Lazy open on first text
+                if current_message.output_index == -1:
+                    current_message.output_index = builder.allocate_output_index()
+                    yield builder.event(
+                        "response.output_item.added",
+                        output_index=current_message.output_index,
+                        item={
+                            "id": current_message.item_id,
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [],
+                            "status": "in_progress",
+                        },
+                    )
+                    yield builder.event(
+                        "response.content_part.added",
+                        output_index=current_message.output_index,
+                        item_id=current_message.item_id,
+                        content_index=0,
+                        part={"type": "output_text", "text": "", "annotations": []},
+                    )
+
+                current_message.text += text
+                yield builder.event(
+                    "response.output_text.delta",
+                    item_id=current_message.item_id,
+                    output_index=current_message.output_index,
+                    content_index=0,
+                    delta=text,
+                    logprobs=[],
+                )
+
+        # Finalize message
+        if current_message and current_message.output_index != -1:
+            yield builder.event(
+                "response.output_text.done",
+                item_id=current_message.item_id,
+                output_index=current_message.output_index,
+                content_index=0,
+                text=current_message.text,
+                logprobs=[],
+            )
+            yield builder.event(
+                "response.content_part.done",
+                output_index=current_message.output_index,
+                item_id=current_message.item_id,
+                content_index=0,
+                part={"type": "output_text", "text": current_message.text, "annotations": []},
+            )
+            item = {
+                "id": current_message.item_id,
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": current_message.text, "annotations": []}] if current_message.text else [],
+            }
+            yield builder.event(
+                "response.output_item.done",
+                output_index=current_message.output_index,
+                item=item,
+            )
+
+        yield builder.event(
+            "response.completed",
+            response=builder.response("completed"),
+        )
+    except Exception as exc:
+        logger.exception("Error in streaming response")
+        yield builder.event(
+            "response.failed",
+            response=builder.response(
+                "failed",
+                error={"code": "server_error", "message": str(exc)},
+            ),
+        )
+
+
 async def emit_response_sse(
     events: AsyncIterable[dict[str, Any]],
     *,
