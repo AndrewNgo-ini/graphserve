@@ -115,34 +115,40 @@ def _ai_message_to_items(msg: AIMessage) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     oai_msg = _message_to_openai_dict(msg)
 
-    # Reasoning block (Claude extended thinking / native reasoning)
-    # Claude format: additional_kwargs["reasoning"] dict with encrypted_content/summary
-    reasoning = msg.additional_kwargs.get("reasoning")
-    if reasoning:
-        encrypted_content = (
-            reasoning.get("encrypted_content")
-            if isinstance(reasoning, dict)
-            else None
-        )
-        summary = reasoning.get("summary", []) if isinstance(reasoning, dict) else []
+    # Reasoning block — three possible formats:
+    # 1. Claude: additional_kwargs["reasoning"] dict with encrypted_content/summary
+    # 2. LiteLLM/vLLM: additional_kwargs["reasoning_content"] flat string
+    # 3. Content blocks with type="thinking" (LiteLLM key="thinking"; Anthropic key="text")
+    reasoning_kwarg = msg.additional_kwargs.get("reasoning")
+    reasoning_content = msg.additional_kwargs.get("reasoning_content")
+    if reasoning_kwarg and isinstance(reasoning_kwarg, dict):
         items.append({
             "type": "reasoning",
             "id": _reasoning_id(msg),
-            "summary": summary,
-            "encrypted_content": encrypted_content,
+            "summary": reasoning_kwarg.get("summary", []),
+            "encrypted_content": reasoning_kwarg.get("encrypted_content"),
+        })
+    elif reasoning_content:
+        items.append({
+            "type": "reasoning",
+            "id": _reasoning_id(msg),
+            "content": [{"type": "reasoning_text", "text": reasoning_content}],
+            "summary": [],
+            "encrypted_content": None,
         })
     else:
-        # OpenRouter/vLLM format: content blocks with type="thinking"
+        # Fall back to content blocks with type="thinking"
         content = oai_msg.get("content", [])
         if isinstance(content, list):
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "thinking":
-                    thinking_text = block.get("text", "")
+                    thinking_text = block.get("thinking") or block.get("text") or ""
                     if thinking_text:
                         items.append({
                             "type": "reasoning",
                             "id": _reasoning_id(msg),
-                            "summary": [thinking_text],
+                            "content": [{"type": "reasoning_text", "text": thinking_text}],
+                            "summary": [],
                             "encrypted_content": None,
                         })
 
