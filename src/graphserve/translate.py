@@ -484,16 +484,23 @@ async def emit_response_sse_from_astream(
 
         print("ASTREAM_START", file=sys.stderr, flush=True)
         event_count = 0
-        async for event in graph.astream(
-            graph_input,
-            config=config,
-            context=context,
-            stream_mode=["messages"],
-            subgraphs=True,
-            version="v2",
-        ):
-            event_count += 1
-            print(f"EVENT[{event_count}]: {event.get('type')}", file=sys.stderr, flush=True)
+        try:
+            astream_gen = graph.astream(
+                graph_input,
+                config=config,
+                context=context,
+                stream_mode=["messages"],
+                subgraphs=True,
+                version="v2",
+            )
+            print(f"ASTREAM_GEN: {astream_gen}", file=sys.stderr, flush=True)
+            async for event in astream_gen:
+                event_count += 1
+                print(f"EVENT[{event_count}]: {event.get('type')}", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"ASTREAM_ERROR: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
             if event.get("type") != "messages":
                 continue
 
