@@ -108,7 +108,11 @@ def build_responses_router(
         # 6. Build LangGraph config
         run_config: dict = {"configurable": {"thread_id": str(conv.id)}}
         if request.chat_template_kwargs:
-            run_config["configurable"]["chat_template_kwargs"] = request.chat_template_kwargs
+            enable = request.chat_template_kwargs.get("enable_thinking", False)
+            run_config["configurable"]["extra_body"] = {
+                "chat_template_kwargs": request.chat_template_kwargs,
+                "reasoning": {"enabled": enable},
+            }
 
         resp_id = format_conv_id(conv.id)
 
