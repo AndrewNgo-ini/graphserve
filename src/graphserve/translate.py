@@ -469,13 +469,12 @@ async def emit_response_sse_from_astream(
     from langchain_core.messages import AIMessageChunk
 
     builder = _ResponseEventBuilder(resp_id=resp_id, model=model, created_at=created_at)
-    current_message: _OutputItemState | None = None
 
     yield builder.event("response.created", response=builder.response("in_progress"))
     yield builder.event("response.in_progress", response=builder.response("in_progress"))
 
+    print("BEFORE_TRY", file=sys.stderr, flush=True)
     try:
-        import sys
         print("AFTER_IMPORT", file=sys.stderr, flush=True)
         current_message = _OutputItemState(
             item_id=_new_item_id("msg"),
