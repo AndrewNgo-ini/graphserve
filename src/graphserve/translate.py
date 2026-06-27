@@ -464,6 +464,8 @@ async def emit_response_sse_from_astream(
     Uses astream with stream_mode=["messages"] to get AIMessageChunk updates,
     then converts them to Responses API SSE format.
     """
+    import sys
+    print("STREAM_START", file=sys.stderr, flush=True)
     from langchain_core.messages import AIMessageChunk
 
     builder = _ResponseEventBuilder(resp_id=resp_id, model=model, created_at=created_at)
