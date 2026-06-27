@@ -455,6 +455,7 @@ async def emit_response_sse(
     model: str,
     created_at: int,
     output_sink: list[str] | None = None,
+    streamable_node_names: list[str] | None = None,
 ) -> AsyncIterator[ServerSentEvent]:
     """Translate LangGraph ``astream_events`` into OpenAI Responses SSE events.
 
@@ -500,6 +501,13 @@ async def emit_response_sse(
                 chunk = data.get("chunk")
                 if chunk is None:
                     continue
+
+                # Filter by streamable_node_names if configured
+                if streamable_node_names:
+                    metadata = event.get("metadata", {})
+                    node_name = metadata.get("langgraph_node")
+                    if node_name not in streamable_node_names:
+                        continue
 
                 # Forward native reasoning (vLLM enable_thinking) as a dedicated
                 # event so clients can show "thinking". Check multiple locations:

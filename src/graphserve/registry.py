@@ -19,6 +19,7 @@ class GraphConfig:
     """
 
     graph: Any
+    streamable_node_names: list[str] | None = None
 
 
 class GraphRegistry:

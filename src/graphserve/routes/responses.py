@@ -129,6 +129,7 @@ def build_responses_router(
                 resp_id=resp_id,
                 model=request.model,
                 created_at=conv.created_at,
+                streamable_node_names=cfg.streamable_node_names,
             )
             return StreamingResponse(
                 encode_sse(sse_stream),
