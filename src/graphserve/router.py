@@ -1,9 +1,7 @@
 """Public builder: mount OpenAI-compatible routes on a consumer's FastAPI app."""
 from __future__ import annotations
 
-from collections.abc import Callable
-
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from graphserve.persistence import ConversationStore, InMemoryConversationStore
 from graphserve.registry import GraphRegistry
@@ -15,10 +13,15 @@ def create_openai_router(
     registry: GraphRegistry,
     *,
     store: ConversationStore | None = None,
-    auth: Callable | None = None,
-    callbacks: Callable[[], list] | None = None,
 ) -> APIRouter:
     """Build an APIRouter with OpenAI-compatible /models and /responses routes.
+
+    GraphServe is a pure bind layer: it serves the registered graphs over the
+    OpenAI APIs and nothing else. Cross-cutting concerns are the consumer's
+    responsibility, applied with standard FastAPI tools:
+
+    - **Auth**: pass ``dependencies=[Depends(...)]`` to ``app.include_router``.
+    - **Callbacks / tracing**: attach to the graph when you construct it.
 
     Parameters
     ----------
@@ -26,11 +29,6 @@ def create_openai_router(
         The ``GraphRegistry`` mapping model names to ``GraphConfig`` objects.
     store:
         Optional conversation store. Defaults to a fresh ``InMemoryConversationStore``.
-    auth:
-        Optional callable used as a FastAPI dependency on the router.
-    callbacks:
-        Optional zero-arg provider invoked per request to produce a fresh
-        LangChain callbacks list (e.g. a per-request tracing handler).
 
     Notes
     -----
@@ -39,8 +37,7 @@ def create_openai_router(
     responsibility (e.g. ``graph.compile(checkpointer=MemorySaver())``).
     """
     store = store or InMemoryConversationStore()
-    deps = [Depends(auth)] if auth else []
-    router = APIRouter(dependencies=deps)
+    router = APIRouter()
 
     @router.get("/models")
     async def list_models() -> dict:
@@ -49,10 +46,7 @@ def create_openai_router(
             "data": [{"id": m, "object": "model"} for m in registry.list_models()],
         }
 
-    # Include the Responses API sub-router.
-    router.include_router(build_responses_router(registry, store, auth, callbacks))
-
-    # Include the Chat Completions sub-router (Task 11).
-    router.include_router(build_chat_router(registry, auth, callbacks))
+    router.include_router(build_responses_router(registry, store))
+    router.include_router(build_chat_router(registry))
 
     return router

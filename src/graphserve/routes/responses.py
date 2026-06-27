@@ -58,8 +58,6 @@ def _input_to_messages(input_val: Any) -> list:
 def build_responses_router(
     registry: GraphRegistry,
     store: ConversationStore,
-    auth: Any | None,
-    callbacks: Any | None = None,
 ) -> APIRouter:
     """Build the /responses sub-router (private — called by create_openai_router)."""
     router = APIRouter()
@@ -108,9 +106,6 @@ def build_responses_router(
 
         # 6. Build LangGraph config
         run_config: dict = {"configurable": {"thread_id": str(conv.id)}}
-        cb_list = callbacks() if callbacks else None
-        if cb_list:
-            run_config["callbacks"] = cb_list
 
         resp_id = format_conv_id(conv.id)
 

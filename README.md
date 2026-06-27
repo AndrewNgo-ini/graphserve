@@ -54,10 +54,18 @@ Your app now exposes:
 create_openai_router(
     registry,          # GraphRegistry — required
     store=None,        # ConversationStore — defaults to InMemoryConversationStore
-    auth=None,         # FastAPI dependency for authentication
-    callbacks=None,    # Callable[[], list] — per-request callbacks provider (e.g. tracing)
 )
 ```
+
+GraphServe is a pure bind layer. Cross-cutting concerns are the consumer's job,
+applied with standard tools:
+
+- **Auth** — apply it where you mount the router:
+  ```python
+  app.include_router(create_openai_router(registry), prefix="/v1",
+                     dependencies=[Depends(verify_api_key)])
+  ```
+- **Callbacks / tracing** — attach to your graph when you build it.
 
 Per-request runtime context is derived generically from the OpenAI request and
 exposed to the graph as LangGraph runtime `context`: `user` → `context["user_id"]`,
