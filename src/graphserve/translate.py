@@ -483,10 +483,15 @@ async def emit_response_sse(
     )
 
     try:
+        event_count = 0
         async for event in events:
+            event_count += 1
             kind = event.get("event")
             data = event.get("data", {})
-            logger.debug(f"astream_events: event={kind}")
+            if kind:
+                metadata = event.get("metadata", {})
+                node = metadata.get("langgraph_node", "?")
+                logger.info(f"astream_events[{event_count}]: {kind} from {node}")
 
             if kind == "on_chat_model_start":
                 # Lazy: do NOT emit output_item.added / content_part.added yet.
