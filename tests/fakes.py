@@ -167,3 +167,26 @@ def plain_text_llm_graph():
     g.add_edge(START, "call_llm")
     g.add_edge("call_llm", END)
     return g.compile()
+
+
+def streaming_text_graph():
+    """Graph whose node *streams* the model so stream_mode='messages' surfaces tokens.
+
+    Unlike plain_text_llm_graph (which uses model.invoke and yields the message
+    whole), this node calls model.astream, so token chunks flow through
+    LangGraph's "messages" stream mode — required to exercise real token-level
+    streaming on the Chat Completions path.
+    """
+    model = FakePlainTextModel()
+
+    async def call_llm(state: State) -> State:
+        final: AIMessageChunk | None = None
+        async for chunk in model.astream(state["messages"]):
+            final = chunk if final is None else final + chunk
+        return {"messages": [final]}
+
+    g = StateGraph(State)
+    g.add_node("call_llm", call_llm)
+    g.add_edge(START, "call_llm")
+    g.add_edge("call_llm", END)
+    return g.compile()

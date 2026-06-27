@@ -86,9 +86,11 @@ def build_chat_router(
                     graph_input,
                     config=run_config,
                     context=context,
-                    stream_mode=["messages"],
+                    stream_mode="messages",
                 ):
-                    # astream with stream_mode=["messages"] yields (chunk, metadata) tuples
+                    # stream_mode="messages" (string) yields (chunk, metadata) tuples.
+                    # NB: a LIST stream_mode would instead yield (mode, (chunk, metadata)),
+                    # whose [0] is the mode string — which silently drops all content.
                     if isinstance(item, tuple) and len(item) == 2:
                         yield item
 
