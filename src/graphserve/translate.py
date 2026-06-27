@@ -585,7 +585,6 @@ async def emit_response_sse_from_astream(
                 item=item,
             )
 
-        print(f"ASTREAM_END: {event_count} events", file=sys.stderr, flush=True)
         yield builder.event(
             "response.completed",
             response=builder.response("completed"),
