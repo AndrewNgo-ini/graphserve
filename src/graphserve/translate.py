@@ -465,6 +465,7 @@ async def emit_response_sse(
     ``created_at`` is an epoch-seconds integer supplied by the caller; no
     ``time.time()`` is called inside this function.
     """
+    print(f"DEBUG: emit_response_sse called with streamable_node_names={streamable_node_names}", flush=True)
 
     builder = _ResponseEventBuilder(resp_id=resp_id, model=model, created_at=created_at)
     completed_output: list[dict[str, Any]] = []
