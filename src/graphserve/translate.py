@@ -501,17 +501,29 @@ async def emit_response_sse(
                     continue
 
                 # Forward native reasoning (vLLM enable_thinking) as a dedicated
-                # event so clients can show "thinking". Additive: unknown event
-                # types are ignored by clients.
+                # event so clients can show "thinking". Check multiple locations:
+                # 1. additional_kwargs["reasoning_content"] or ["reasoning"] (vLLM)
+                # 2. content field with type="thinking" (OpenRouter streaming)
                 extra = getattr(chunk, "additional_kwargs", None)
+                reasoning = ""
                 if isinstance(extra, dict):
                     reasoning = extra.get("reasoning_content") or extra.get("reasoning") or ""
-                    if reasoning:
-                        yield builder.event(
-                            "response.reasoning.delta",
-                            item_id=current_message.item_id if current_message else None,
-                            delta=reasoning,
-                        )
+
+                # Also check content blocks for type="thinking"
+                if not reasoning:
+                    content = getattr(chunk, "content", None)
+                    if isinstance(content, list):
+                        for block in content:
+                            if isinstance(block, dict) and block.get("type") == "thinking":
+                                reasoning = block.get("text", "")
+                                break
+
+                if reasoning:
+                    yield builder.event(
+                        "response.reasoning_text.delta",
+                        item_id=current_message.item_id if current_message else None,
+                        delta=reasoning,
+                    )
 
                 text = _chunk_text(chunk)
                 if text and current_message is not None:
