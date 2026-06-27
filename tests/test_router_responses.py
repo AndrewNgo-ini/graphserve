@@ -127,18 +127,19 @@ def test_input_items_unknown_id_404():
 # metadata field tests
 # ---------------------------------------------------------------------------
 
-def test_responses_metadata_accepted_and_reaches_context_factory():
-    """A responses request with metadata is accepted (200) and context_factory receives it."""
+def test_responses_metadata_reaches_graph_context():
+    """A responses request forwards metadata to the graph as generic runtime context."""
+    from langchain_core.messages import AIMessage
+
     captured: dict = {}
 
+    class FakeGraph:
+        async def ainvoke(self, graph_input, config=None, context=None):
+            captured["context"] = context
+            return {"messages": [AIMessage(content="ok")]}
+
     reg = GraphRegistry()
-    reg.register(
-        "meta-resp-model",
-        GraphConfig(
-            graph=echo_graph(),
-            context_factory=lambda req: captured.update(req.metadata or {}),
-        ),
-    )
+    reg.register("meta-resp-model", GraphConfig(graph=FakeGraph()))
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     client = TestClient(app)
@@ -153,4 +154,5 @@ def test_responses_metadata_accepted_and_reaches_context_factory():
         },
     )
     assert r.status_code == 200
-    assert captured == {"patient_id": "P-12345", "session": "abc"}
+    assert captured["context"]["metadata"]["patient_id"] == "P-12345"
+    assert captured["context"]["metadata"]["session"] == "abc"

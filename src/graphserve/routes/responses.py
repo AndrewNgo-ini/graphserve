@@ -19,6 +19,7 @@ from graphserve.translate import (
     extract_text,
     lc_messages_to_openai_items,
     messages_to_response_dict,
+    request_to_context,
 )
 
 
@@ -105,7 +106,7 @@ def build_responses_router(
             graph_input = {"messages": _input_to_messages(request.input)}
 
         # 5. Build context and callbacks
-        context = cfg.context_factory(request) if cfg.context_factory else None
+        context = request_to_context(request)
         callbacks = cfg.callbacks_factory(request) if cfg.callbacks_factory else None
 
         # 6. Build LangGraph config

@@ -191,6 +191,33 @@ def _lc_messages_to_items(messages: list[BaseMessage]) -> list[dict[str, Any]]:
 # Public API
 # ---------------------------------------------------------------------------
 
+def request_to_context(request: Any) -> dict | None:
+    """Build LangGraph runtime context from an OpenAI request, generically.
+
+    Maps the standard OpenAI request fields onto a context envelope every
+    graph's middleware can read:
+      - ``user`` -> ``context["user_id"]``
+      - ``instructions`` (Responses API) -> ``context["metadata"]["custom_instructions"]``
+      - ``metadata`` -> ``context["metadata"]`` (passed through verbatim)
+
+    Returns ``None`` when the request carries none of these, so the graph runs
+    with no runtime context.
+    """
+    metadata: dict[str, Any] = dict(getattr(request, "metadata", None) or {})
+    instructions = getattr(request, "instructions", None)
+    if instructions:
+        metadata["custom_instructions"] = instructions
+
+    context: dict[str, Any] = {}
+    user = getattr(request, "user", None)
+    if user:
+        context["user_id"] = user
+    if metadata:
+        context["metadata"] = metadata
+
+    return context or None
+
+
 def lc_messages_to_openai_items(messages: list[BaseMessage]) -> list[dict]:
     """Convert LangChain messages to OpenAI Responses API item dicts.
 

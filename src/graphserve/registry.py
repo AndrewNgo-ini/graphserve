@@ -19,7 +19,6 @@ class GraphConfig:
 
     graph: Any
     request_to_input: Callable[..., dict] | None = None
-    context_factory: Callable[..., Any] | None = None
     output_to_text: Callable[..., str] | None = None
     callbacks_factory: Callable[..., list] | None = None
 

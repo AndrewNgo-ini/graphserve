@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from graphserve.errors import openai_error_body
 from graphserve.registry import GraphRegistry, UnknownModelError
-from graphserve.translate import chat_completion_chunks, extract_text
+from graphserve.translate import chat_completion_chunks, extract_text, request_to_context
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -87,7 +87,7 @@ def build_chat_router(
             graph_input = {"messages": lc_messages}
 
         # 4. Build context and callbacks
-        context = cfg.context_factory(request) if cfg.context_factory else None
+        context = request_to_context(request)
         callbacks = cfg.callbacks_factory(request) if cfg.callbacks_factory else None
 
         # 5. Build LangGraph config — use conversation_id from metadata as thread_id if provided,

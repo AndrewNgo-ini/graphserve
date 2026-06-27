@@ -61,19 +61,19 @@ def test_chat_non_streaming_output_to_text():
 # metadata field tests
 # ---------------------------------------------------------------------------
 
-def test_chat_metadata_accepted_and_reaches_context_factory():
-    """A request with metadata={"foo": "bar"} is accepted (200) and the full metadata
-    dict is available to the context_factory via request.metadata."""
+def test_chat_metadata_reaches_graph_context():
+    """Request metadata is forwarded to the graph as generic runtime context."""
+    from langchain_core.messages import AIMessage
+
     captured: dict = {}
 
+    class FakeGraph:
+        async def ainvoke(self, graph_input, config=None, context=None):
+            captured["context"] = context
+            return {"messages": [AIMessage(content="ok")]}
+
     reg = GraphRegistry()
-    reg.register(
-        "meta-model",
-        GraphConfig(
-            graph=echo_graph(),
-            context_factory=lambda req: captured.update(req.metadata or {}),
-        ),
-    )
+    reg.register("meta-model", GraphConfig(graph=FakeGraph()))
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     client = TestClient(app)
@@ -87,7 +87,7 @@ def test_chat_metadata_accepted_and_reaches_context_factory():
         },
     )
     assert r.status_code == 200
-    assert captured == {"foo": "bar"}
+    assert captured["context"]["metadata"]["foo"] == "bar"
 
 
 def test_chat_metadata_none_accepted():
