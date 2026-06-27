@@ -509,8 +509,9 @@ async def emit_response_sse_from_astream(
                 content = getattr(message, "content", None)
                 if isinstance(content, list):
                     for block in content:
-                        if isinstance(block, dict) and block.get("type") == "thinking":
-                            reasoning = block.get("text", "")
+                        if isinstance(block, dict) and block.get("type") in ("thinking", "reasoning"):
+                            # LiteLLM uses "thinking" key; Anthropic uses "text"
+                            reasoning = block.get("thinking") or block.get("text") or ""
                             break
 
             if reasoning and current_message:
