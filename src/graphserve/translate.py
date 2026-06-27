@@ -116,6 +116,7 @@ def _ai_message_to_items(msg: AIMessage) -> list[dict[str, Any]]:
     oai_msg = _message_to_openai_dict(msg)
 
     # Reasoning block (Claude extended thinking / native reasoning)
+    # Claude format: additional_kwargs["reasoning"] dict with encrypted_content/summary
     reasoning = msg.additional_kwargs.get("reasoning")
     if reasoning:
         encrypted_content = (
@@ -130,6 +131,20 @@ def _ai_message_to_items(msg: AIMessage) -> list[dict[str, Any]]:
             "summary": summary,
             "encrypted_content": encrypted_content,
         })
+    else:
+        # OpenRouter/vLLM format: content blocks with type="thinking"
+        content = oai_msg.get("content", [])
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "thinking":
+                    thinking_text = block.get("text", "")
+                    if thinking_text:
+                        items.append({
+                            "type": "reasoning",
+                            "id": _reasoning_id(msg),
+                            "summary": [thinking_text],
+                            "encrypted_content": None,
+                        })
 
     tool_calls = cast(list[dict[str, Any]], oai_msg.get("tool_calls") or [])
     for tool_call in tool_calls:
