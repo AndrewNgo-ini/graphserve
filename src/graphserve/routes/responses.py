@@ -118,7 +118,13 @@ def build_responses_router(
 
         # 7a. Streaming path
         if request.stream:
-            events = graph.astream_events(graph_input, config=run_config, version="v2", context=context)
+            events = graph.astream_events(
+                graph_input,
+                config=run_config,
+                version="v2",
+                context=context,
+                stream_mode=["messages"],
+            )
             sse_stream = emit_response_sse(
                 events,
                 resp_id=resp_id,
