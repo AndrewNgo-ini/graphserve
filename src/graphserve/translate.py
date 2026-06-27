@@ -479,6 +479,8 @@ async def emit_response_sse_from_astream(
             item_type="message",
         )
 
+        logger.info(f"Starting astream with config={config}, context={context}")
+        event_count = 0
         async for event in graph.astream(
             graph_input,
             config=config,
@@ -487,6 +489,8 @@ async def emit_response_sse_from_astream(
             subgraphs=True,
             version="v2",
         ):
+            event_count += 1
+            logger.info(f"astream event {event_count}: type={event.get('type')}")
             if event.get("type") != "messages":
                 continue
 
@@ -586,6 +590,7 @@ async def emit_response_sse_from_astream(
                 item=item,
             )
 
+        logger.info(f"astream completed after {event_count} events")
         yield builder.event(
             "response.completed",
             response=builder.response("completed"),
