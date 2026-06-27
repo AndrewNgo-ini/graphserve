@@ -499,7 +499,7 @@ async def emit_response_sse_from_astream(
                 if node_name not in streamable_node_names:
                     continue
 
-            # Extract reasoning if present
+            # Extract reasoning if present (LangChain doesn't yet extract vLLM reasoning field)
             extra = getattr(message, "additional_kwargs", None)
             reasoning = ""
             if isinstance(extra, dict):
