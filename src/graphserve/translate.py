@@ -484,6 +484,8 @@ async def emit_response_sse(
 
     try:
         async for event in events:
+            kind = event.get("event")
+            data = event.get("data", {})
 
             if kind == "on_chat_model_start":
                 # Lazy: do NOT emit output_item.added / content_part.added yet.
