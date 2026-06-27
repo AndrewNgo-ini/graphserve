@@ -32,6 +32,7 @@ class ResponseCreateRequest(BaseModel):
     conversation: str | None = None
     instructions: str | None = None
     metadata: dict[str, Any] | None = None
+    chat_template_kwargs: dict[str, Any] | None = None
 
 
 def _input_to_messages(input_val: Any) -> list:
@@ -106,6 +107,8 @@ def build_responses_router(
 
         # 6. Build LangGraph config
         run_config: dict = {"configurable": {"thread_id": str(conv.id)}}
+        if request.chat_template_kwargs:
+            run_config["configurable"]["chat_template_kwargs"] = request.chat_template_kwargs
 
         resp_id = format_conv_id(conv.id)
 
