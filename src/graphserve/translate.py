@@ -464,8 +464,6 @@ async def emit_response_sse_from_astream(
     Uses astream with stream_mode=["messages"] to get AIMessageChunk updates,
     then converts them to Responses API SSE format.
     """
-    import sys
-    print("STREAM_START", file=sys.stderr, flush=True)
     from langchain_core.messages import AIMessageChunk
 
     builder = _ResponseEventBuilder(resp_id=resp_id, model=model, created_at=created_at)
@@ -473,35 +471,21 @@ async def emit_response_sse_from_astream(
     yield builder.event("response.created", response=builder.response("in_progress"))
     yield builder.event("response.in_progress", response=builder.response("in_progress"))
 
-    print("BEFORE_TRY", file=sys.stderr, flush=True)
     try:
-        print("AFTER_IMPORT", file=sys.stderr, flush=True)
         current_message = _OutputItemState(
             item_id=_new_item_id("msg"),
             output_index=-1,
             item_type="message",
         )
-        print("AFTER_STATE", file=sys.stderr, flush=True)
 
-        print("ASTREAM_START", file=sys.stderr, flush=True)
-        event_count = 0
-        try:
-            astream_gen = graph.astream(
-                graph_input,
-                config=config,
-                context=context,
-                stream_mode=["messages"],
-                subgraphs=True,
-                version="v2",
-            )
-            print(f"ASTREAM_GEN: {astream_gen}", file=sys.stderr, flush=True)
-            async for event in astream_gen:
-                event_count += 1
-                print(f"EVENT[{event_count}]: {event.get('type')}", file=sys.stderr, flush=True)
-        except Exception as e:
-            print(f"ASTREAM_ERROR: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
-            import traceback
-            traceback.print_exc(file=sys.stderr)
+        async for event in graph.astream(
+            graph_input,
+            config=config,
+            context=context,
+            stream_mode=["messages"],
+            subgraphs=True,
+            version="v2",
+        ):
             if event.get("type") != "messages":
                 continue
 
