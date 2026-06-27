@@ -77,7 +77,7 @@ def build_chat_router(
             ) from exc
 
         # 2. Resolve graph
-        graph = await cfg.resolve_graph()
+        graph = cfg.graph
 
         # 3. Build input from messages
         if cfg.request_to_input is not None:

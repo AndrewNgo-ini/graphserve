@@ -19,10 +19,6 @@ def test_duplicate_registration_raises():
     with pytest.raises(ValueError):
         reg.register("m", GraphConfig(graph=object()))
 
-async def test_resolve_graph_direct_and_callable():
+def test_graph_is_stored_as_is():
     sentinel = object()
-    assert await GraphConfig(graph=sentinel).resolve_graph() is sentinel
-    assert await GraphConfig(graph=lambda: sentinel).resolve_graph() is sentinel
-    async def factory():
-        return sentinel
-    assert await GraphConfig(graph=factory).resolve_graph() is sentinel
+    assert GraphConfig(graph=sentinel).graph is sentinel

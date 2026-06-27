@@ -96,7 +96,7 @@ def build_responses_router(
             )
 
         # 3. Resolve graph
-        graph = await cfg.resolve_graph()
+        graph = cfg.graph
 
         # 4. Build input
         if cfg.request_to_input is not None:
@@ -170,7 +170,7 @@ def build_responses_router(
 
         # Resolve the graph and replay thread state from the checkpointer.
         cfg = registry.resolve(conv.model)
-        graph = await cfg.resolve_graph()
+        graph = cfg.graph
         try:
             state = await graph.aget_state({"configurable": {"thread_id": str(conv_uuid)}})
             messages = state.values.get("messages", []) if state and state.values else []
@@ -213,7 +213,7 @@ def build_responses_router(
 
         # Replay thread state from the checkpointer (same source as get_response).
         cfg = registry.resolve(conv.model)
-        graph = await cfg.resolve_graph()
+        graph = cfg.graph
         try:
             state = await graph.aget_state({"configurable": {"thread_id": str(conv_uuid)}})
             messages = state.values.get("messages", []) if state and state.values else []
