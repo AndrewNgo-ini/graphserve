@@ -465,7 +465,6 @@ async def emit_response_sse(
     ``created_at`` is an epoch-seconds integer supplied by the caller; no
     ``time.time()`` is called inside this function.
     """
-    print(f"DEBUG: emit_response_sse called with streamable_node_names={streamable_node_names}", flush=True)
 
     builder = _ResponseEventBuilder(resp_id=resp_id, model=model, created_at=created_at)
     completed_output: list[dict[str, Any]] = []
@@ -484,17 +483,7 @@ async def emit_response_sse(
     )
 
     try:
-        logger.info("Starting event stream loop")
-        event_count = 0
         async for event in events:
-            event_count += 1
-            kind = event.get("event")
-            data = event.get("data", {})
-            if kind:
-                metadata = event.get("metadata", {})
-                node = metadata.get("langgraph_node", "?")
-                logger.info(f"astream_events[{event_count}]: {kind} from {node}")
-        logger.info(f"Event stream ended after {event_count} events")
 
             if kind == "on_chat_model_start":
                 # Lazy: do NOT emit output_item.added / content_part.added yet.
@@ -511,11 +500,11 @@ async def emit_response_sse(
                     continue
 
                 # Filter by streamable_node_names if configured
-                if streamable_node_names:
-                    metadata = event.get("metadata", {})
-                    node_name = metadata.get("langgraph_node")
-                    if node_name not in streamable_node_names:
-                        continue
+                # if streamable_node_names:
+                #     metadata = event.get("metadata", {})
+                #     node_name = metadata.get("langgraph_node")
+                #     if node_name not in streamable_node_names:
+                #         continue
 
                 # Forward native reasoning (vLLM enable_thinking) as a dedicated
                 # event so clients can show "thinking". Check multiple locations:
