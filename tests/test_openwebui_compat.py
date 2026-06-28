@@ -12,7 +12,7 @@ from langchain_core.messages import (
     AIMessage, HumanMessage, SystemMessage, ToolMessage,
 )
 from graphserve import GraphRegistry, GraphConfig, create_openai_router
-from tests.fakes import echo_graph, streaming_text_graph, recording_graph
+from tests.fakes import echo_graph, streaming_text_graph, recording_graph, internal_tool_graph
 
 
 def _client(model: str, graph) -> TestClient:
@@ -257,6 +257,30 @@ def test_streaming_chunk_shape_and_terminator():
 
     # Final chunk carries finish_reason="stop" for a plain text turn.
     assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
+
+
+def test_internal_tool_call_finish_reason_is_stop():
+    """When the agent handles a tool internally and replies with text, finish_reason must be "stop".
+
+    A graph that makes a tool call and then produces a final text response must NOT
+    end the stream with finish_reason="tool_calls" — that would tell OpenWebUI to
+    execute the tool itself, causing it to discard the streamed text response.
+    """
+    client = _client("medical", internal_tool_graph())
+    _, chunks, _ = _collect_sse(client, {
+        "model": "medical",
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": True,
+    })
+
+    # The final streamed text ("done") must be present.
+    text = "".join(c["choices"][0]["delta"].get("content") or "" for c in chunks)
+    assert "done" in text, f"Expected final text in stream, got: {text!r}"
+
+    # finish_reason must be "stop", not "tool_calls".
+    assert chunks[-1]["choices"][0]["finish_reason"] == "stop", (
+        "Internal tool call must not leak finish_reason='tool_calls' to the client"
+    )
 
 
 def test_extra_openai_params_tolerated():

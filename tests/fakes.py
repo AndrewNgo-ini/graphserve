@@ -99,6 +99,49 @@ class FakePlainTextModel(BaseChatModel):
 # Graphs
 # ---------------------------------------------------------------------------
 
+def internal_tool_graph():
+    """Graph that simulates an agent making an internal tool call then replying with text.
+
+    Turn 1: model emits a tool_call_chunk → graph routes to tool executor.
+    Turn 2: model receives tool result, emits plain text → END.
+
+    Used to verify that finish_reason is "stop" (not "tool_calls") when the
+    graph handles the tool internally and produces a final text response.
+    """
+    from langchain_core.messages import ToolMessage
+
+    model = FakeToolThenTextModel()
+
+    async def call_model(state: State) -> State:
+        final: AIMessageChunk | None = None
+        async for chunk in model.astream(state["messages"]):
+            final = chunk if final is None else final + chunk
+        return {"messages": [final]}
+
+    def route(state: State) -> str:
+        last = state["messages"][-1]
+        if hasattr(last, "tool_calls") and last.tool_calls:
+            return "tool_executor"
+        if hasattr(last, "tool_call_chunks") and last.tool_call_chunks:
+            return "tool_executor"
+        return END
+
+    def tool_executor(state: State) -> State:
+        last = state["messages"][-1]
+        call_id = "call_1"
+        if hasattr(last, "tool_calls") and last.tool_calls:
+            call_id = last.tool_calls[0].get("id", call_id)
+        return {"messages": [ToolMessage(content="tool result", tool_call_id=call_id)]}
+
+    g = StateGraph(State)
+    g.add_node("call_model", call_model)
+    g.add_node("tool_executor", tool_executor)
+    g.add_edge(START, "call_model")
+    g.add_conditional_edges("call_model", route)
+    g.add_edge("tool_executor", "call_model")
+    return g.compile()
+
+
 def echo_graph():
     def respond(state: State) -> State:
         last = state["messages"][-1]

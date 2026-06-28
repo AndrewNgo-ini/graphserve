@@ -943,8 +943,12 @@ async def chat_completion_chunks(
         )
         return f"data: {chunk.model_dump_json()}\n\n".encode()
 
-    # Per-chunk content + tool-call deltas
-    saw_tool_call = False
+    # Per-chunk content + tool-call deltas.
+    # pending_tool_call: True while the current model turn is emitting tool calls
+    # with no subsequent text. Reset to False when text arrives after a tool call
+    # so that internal tool use (model calls tool → gets result → replies with text)
+    # ends with finish_reason="stop" rather than "tool_calls".
+    pending_tool_call = False
     tool_index: dict[str, int] = {}
     next_index = 0
     async for msg_chunk, _metadata in message_stream:
@@ -953,10 +957,11 @@ async def chat_completion_chunks(
 
         text_content = extract_text(msg_chunk.content) if msg_chunk.content else ""
         if text_content:
+            pending_tool_call = False  # text after a tool call → agent handled it
             yield _chunk(ChoiceDelta(content=text_content))
 
         for tcc in getattr(msg_chunk, "tool_call_chunks", None) or []:
-            saw_tool_call = True
+            pending_tool_call = True
             # OpenAI deltas correlate fragments by a stable integer index. Use the
             # chunk's own index when present; otherwise assign one per call id.
             idx = tcc.get("index")
@@ -971,7 +976,6 @@ async def chat_completion_chunks(
             yield _chunk(ChoiceDelta(tool_calls=[ChoiceDeltaToolCall(
                 index=idx,
                 id=call_id or None,
-                # id+type appear on the first fragment for an index, args thereafter.
                 type="function" if call_id else None,
                 function=ChoiceDeltaToolCallFunction(
                     name=tcc.get("name") or None,
@@ -979,8 +983,10 @@ async def chat_completion_chunks(
                 ),
             )]))
 
-    # Final chunk: tool_calls turns finish with "tool_calls", text turns with "stop".
-    yield _chunk(ChoiceDelta(), finish_reason="tool_calls" if saw_tool_call else "stop")
+    # finish_reason="tool_calls" only when the stream ended mid-tool-call
+    # (i.e. the client is expected to execute the tool). If the agent handled
+    # the tool internally and produced final text, finish with "stop".
+    yield _chunk(ChoiceDelta(), finish_reason="tool_calls" if pending_tool_call else "stop")
 
     # SSE terminator
     yield b"data: [DONE]\n\n"
