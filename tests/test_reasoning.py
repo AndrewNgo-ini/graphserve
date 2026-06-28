@@ -276,3 +276,38 @@ def test_s6_nonstream_default_no_reasoning():
     item_types = [i["type"] for i in items]
     assert "reasoning" not in item_types, "S6: default non-stream has no reasoning"
     assert "message" in item_types, "S6: message item missing"
+
+
+# ---------------------------------------------------------------------------
+# response.completed must carry non-empty output (OpenWebUI regression)
+# ---------------------------------------------------------------------------
+
+async def test_response_completed_output_not_empty():
+    """response.completed must carry the accumulated output items.
+
+    OpenWebUI renders from response.completed.output — an empty output array
+    causes the streamed text to disappear after the stream finishes.
+    """
+    evts = await _drain(
+        emit_response_sse_from_astream(
+            _graph_no_reasoning(),
+            {"messages": []},
+            config={},
+            context=None,
+            streamable_node_names=["model"],
+            resp_id="r_owui",
+            model="m",
+            created_at=1,
+        )
+    )
+    completed_evt = next(
+        (e for e in evts if e.event == "response.completed"), None
+    )
+    assert completed_evt is not None, "response.completed event missing"
+    data = completed_evt.data
+    resp = data.get("response") if isinstance(data, dict) else getattr(data, "response", {})
+    output = resp.get("output") if isinstance(resp, dict) else getattr(resp, "output", [])
+    assert output, "response.completed.response.output must be non-empty"
+    assert any(item.get("type") == "message" for item in output), (
+        "response.completed output must contain the assistant message item"
+    )

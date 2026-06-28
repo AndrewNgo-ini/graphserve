@@ -483,6 +483,7 @@ async def emit_response_sse_from_astream(
             output_index=-1,
             item_type="message",
         )
+        completed_output: list[dict] = []
 
         async for event in graph.astream(
             graph_input,
@@ -586,6 +587,7 @@ async def emit_response_sse_from_astream(
                 "status": "completed",
                 "content": [{"type": "output_text", "text": current_message.text, "annotations": []}] if current_message.text else [],
             }
+            completed_output.append(item)
             yield builder.event(
                 "response.output_item.done",
                 output_index=current_message.output_index,
@@ -594,7 +596,7 @@ async def emit_response_sse_from_astream(
 
         yield builder.event(
             "response.completed",
-            response=builder.response("completed"),
+            response=builder.response("completed", output=completed_output),
         )
     except Exception as exc:
         logger.exception("Error in streaming response")
