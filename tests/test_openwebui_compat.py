@@ -43,3 +43,64 @@ def test_models_list_shape_owui_parses():
     ids = [m["id"] for m in body["data"]]
     assert set(ids) == {"medical", "triage"}
     assert all(m["object"] == "model" for m in body["data"])
+
+
+def test_full_history_replayed_to_graph():
+    """OWUI sends the full messages array every turn; the graph must see all of it.
+
+    OWUI keeps conversation state in its own DB and replays system+prior turns
+    on each call. The backend is stateless: every message in the request must
+    reach the graph, with roles mapped to the correct LangChain message types.
+    """
+    graph, received = recording_graph()
+    client = _client("medical", graph)
+
+    payload = {
+        "model": "medical",
+        "messages": [
+            {"role": "system", "content": "You are a helpful clinic assistant."},
+            {"role": "user", "content": "I have a headache."},
+            {"role": "assistant", "content": "How long have you had it?"},
+            {"role": "user", "content": "Two days."},
+        ],
+    }
+    r = client.post("/v1/chat/completions", json=payload)
+    assert r.status_code == 200, r.text
+
+    seen = received["messages"]
+    assert len(seen) == 4
+    assert isinstance(seen[0], SystemMessage)
+    assert isinstance(seen[1], HumanMessage)
+    assert isinstance(seen[2], AIMessage)
+    assert isinstance(seen[3], HumanMessage)
+    assert seen[0].content == "You are a helpful clinic assistant."
+    assert seen[3].content == "Two days."
+
+
+def test_each_request_is_self_contained():
+    """A second request does NOT accumulate the first request's messages.
+
+    With no checkpointer (default), each call is an independent thread; the graph
+    must see only the messages from the current request — matching OWUI's
+    stateless replay model where it always sends the complete history itself.
+    """
+    graph, received = recording_graph()
+    client = _client("medical", graph)
+
+    client.post("/v1/chat/completions", json={
+        "model": "medical",
+        "messages": [{"role": "user", "content": "first"}],
+    })
+    assert len(received["messages"]) == 1
+
+    client.post("/v1/chat/completions", json={
+        "model": "medical",
+        "messages": [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "user", "content": "second"},
+        ],
+    })
+    # Sees exactly the 3 messages from THIS request, not 1 + 3 accumulated.
+    assert len(received["messages"]) == 3
+    assert received["messages"][-1].content == "second"
