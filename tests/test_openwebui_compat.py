@@ -104,3 +104,59 @@ def test_each_request_is_self_contained():
     # Sees exactly the 3 messages from THIS request, not 1 + 3 accumulated.
     assert len(received["messages"]) == 3
     assert received["messages"][-1].content == "second"
+
+
+def test_tool_role_history_accepted():
+    """OWUI replays prior tool-call turns: assistant(tool_calls) + tool(result).
+
+    A conversation that previously used tools is replayed verbatim. The backend
+    must accept the tool role (with tool_call_id) without erroring and forward a
+    ToolMessage to the graph.
+    """
+    graph, received = recording_graph()
+    client = _client("medical", graph)
+
+    payload = {
+        "model": "medical",
+        "messages": [
+            {"role": "user", "content": "weather in Hanoi?"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "get_weather", "arguments": "{\"city\":\"Hanoi\"}"},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "31C, sunny"},
+            {"role": "user", "content": "and tomorrow?"},
+        ],
+    }
+    r = client.post("/v1/chat/completions", json=payload)
+    assert r.status_code == 200, r.text
+    assert any(isinstance(m, ToolMessage) for m in received["messages"])
+
+
+def test_multimodal_content_array_accepted():
+    """OWUI sends content as an array of parts (text + image_url) for vision turns.
+
+    The backend must accept list-form content without a 422/500. (Whether the
+    graph uses the image is the graph's concern; the bind layer must not reject.)
+    """
+    graph, received = recording_graph()
+    client = _client("medical", graph)
+
+    payload = {
+        "model": "medical",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what is in this image?"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}},
+            ],
+        }],
+    }
+    r = client.post("/v1/chat/completions", json=payload)
+    assert r.status_code == 200, r.text
+    assert isinstance(received["messages"][0], HumanMessage)
