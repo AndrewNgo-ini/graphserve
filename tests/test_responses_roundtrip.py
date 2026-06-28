@@ -43,15 +43,26 @@ def test_get_after_create_returns_non_empty_output():
     assert "echo: hi" in content_text, f"Expected 'echo: hi' in content, got: {content_text!r}"
 
 
-def test_get_after_create_no_checkpointer_returns_empty_output():
-    """GET /responses/{id} on a graph without a checkpointer returns 200 with empty output."""
-    c = _client(echo_graph())
+def test_get_after_create_injects_checkpointer_for_checkpointerless_graph():
+    """A graph compiled without a checkpointer still replays state on GET.
+
+    create_openai_router injects an InMemorySaver into checkpointer-less graphs,
+    so GET /responses/{id} returns the persisted assistant message.
+    """
+    c = _client(echo_graph())  # compiled WITHOUT a checkpointer
     created = c.post("/v1/responses", json={"model": "m", "input": "hi", "stream": False}).json()
     got = c.get(f"/v1/responses/{created['id']}")
     assert got.status_code == 200
     body = got.json()
     assert body["id"] == created["id"]
-    assert body["output"] == [], f"Expected empty output for checkpointer-less graph, got: {body['output']}"
+    assert body["output"], "Expected injected checkpointer to persist state"
+    content_text = "".join(
+        block.get("text", "")
+        for item in body["output"]
+        if item.get("type") == "message"
+        for block in item.get("content", [])
+    )
+    assert "echo: hi" in content_text
 
 
 def test_no_double_emission_single_assistant_message():

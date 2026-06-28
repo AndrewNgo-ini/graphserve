@@ -1,21 +1,29 @@
-"""OpenAI Responses API route handler."""
+"""OpenAI Responses API route handler.
+
+Storeless: conversation state lives entirely in the registered graph's LangGraph
+checkpointer, keyed by ``thread_id``. The response id encodes the model
+(``resp_<model>.<hex>``) so stateless GET/DELETE can resolve the owning graph.
+"""
 from __future__ import annotations
 
 import time
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-from graphserve._ids import format_conv_id, parse_conv_id
+from graphserve._ids import (
+    format_resp_id,
+    parse_resp_id,
+    thread_uuid_from_anchor,
+)
 from graphserve.errors import openai_error_body
-from graphserve.persistence import ConversationNotFoundError, ConversationStore
 from graphserve.registry import GraphRegistry, UnknownModelError
 from graphserve.translate import (
     encode_sse,
-    emit_response_sse,
     emit_response_sse_from_astream,
     extract_text,
     lc_messages_to_openai_items,
@@ -57,16 +65,24 @@ def _input_to_messages(input_val: Any) -> list:
     return [HumanMessage(content=str(input_val))]
 
 
-def build_responses_router(
-    registry: GraphRegistry,
-    store: ConversationStore,
-) -> APIRouter:
+def _not_found(response_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail=openai_error_body(
+            f"Response {response_id!r} not found",
+            type="invalid_request_error",
+            code="response_not_found",
+        ),
+    )
+
+
+def build_responses_router(registry: GraphRegistry) -> APIRouter:
     """Build the /responses sub-router (private — called by create_openai_router)."""
     router = APIRouter()
 
     @router.post("/responses")
     async def create_response(request: ResponseCreateRequest):
-        # 1. Resolve model config
+        # 1. Resolve model -> graph (model is always present on create).
         try:
             cfg = registry.resolve(request.model)
         except UnknownModelError as exc:
@@ -79,35 +95,25 @@ def build_responses_router(
                 ),
             ) from exc
 
-        # 2. Resolve or create conversation
-        # `conversation` takes precedence over `previous_response_id` when both are set.
+        # 2. Resolve the thread. `conversation` takes precedence over
+        #    `previous_response_id`; both anchor to an existing thread. Absent
+        #    either, mint a fresh thread (ephemeral conversation).
         anchor = request.conversation or request.previous_response_id
         if anchor:
-            conv = await store.resolve_previous(anchor)
-            if conv is None:
-                conv = await store.create(
-                    model=request.model,
-                    user=request.user,
-                    created_at=int(time.time()),
-                )
+            try:
+                thread_uuid = thread_uuid_from_anchor(anchor)
+            except ValueError:
+                thread_uuid = uuid4()
         else:
-            conv = await store.create(
-                model=request.model,
-                user=request.user,
-                created_at=int(time.time()),
-            )
+            thread_uuid = uuid4()
 
-        # 3. Resolve graph
         graph = cfg.graph
-
-        # 4. Build input
         graph_input = {"messages": _input_to_messages(request.input)}
-
-        # 5. Build context
         context = request_to_context(request)
+        created_at = int(time.time())
 
-        # 6. Build LangGraph config
-        run_config: dict = {"configurable": {"thread_id": str(conv.id)}}
+        # 3. LangGraph config.
+        run_config: dict = {"configurable": {"thread_id": str(thread_uuid)}}
         if request.chat_template_kwargs:
             enable = request.chat_template_kwargs.get("enable_thinking", False)
             run_config["configurable"]["extra_body"] = {
@@ -115,9 +121,9 @@ def build_responses_router(
                 "reasoning": {"enabled": enable},
             }
 
-        resp_id = format_conv_id(conv.id)
+        resp_id = format_resp_id(request.model, thread_uuid)
 
-        # 7a. Streaming path
+        # 4a. Streaming path
         if request.stream:
             sse_stream = emit_response_sse_from_astream(
                 graph,
@@ -127,7 +133,7 @@ def build_responses_router(
                 streamable_node_names=cfg.streamable_node_names,
                 resp_id=resp_id,
                 model=request.model,
-                created_at=conv.created_at,
+                created_at=created_at,
             )
             return StreamingResponse(
                 encode_sse(sse_stream),
@@ -138,89 +144,45 @@ def build_responses_router(
                 },
             )
 
-        # 7b. Non-streaming path
+        # 4b. Non-streaming path
         result = await graph.ainvoke(graph_input, config=run_config, context=context)
         return messages_to_response_dict(
             result.get("messages", []) if isinstance(result, dict) else [],
-            conversation_id=conv.id,
+            conversation_id=thread_uuid,
             model=request.model,
-            created_at=conv.created_at,
+            created_at=created_at,
         )
+
+    def _resolve(response_id: str):
+        """Parse the response id and resolve (model, thread_uuid, graph)."""
+        try:
+            model, thread_uuid = parse_resp_id(response_id)
+            cfg = registry.resolve(model)
+        except (ValueError, UnknownModelError) as exc:
+            raise _not_found(response_id) from exc
+        return model, thread_uuid, cfg.graph
 
     @router.get("/responses/{response_id}")
     async def get_response(response_id: str):
+        model, thread_uuid, graph = _resolve(response_id)
         try:
-            conv_uuid = parse_conv_id(response_id)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=openai_error_body(
-                    f"Response {response_id!r} not found",
-                    type="invalid_request_error",
-                    code="response_not_found",
-                ),
-            ) from exc
-
-        try:
-            conv = await store.get(conv_uuid)
-        except ConversationNotFoundError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=openai_error_body(
-                    f"Response {response_id!r} not found",
-                    type="invalid_request_error",
-                    code="response_not_found",
-                ),
-            ) from exc
-
-        # Resolve the graph and replay thread state from the checkpointer.
-        cfg = registry.resolve(conv.model)
-        graph = cfg.graph
-        try:
-            state = await graph.aget_state({"configurable": {"thread_id": str(conv_uuid)}})
+            state = await graph.aget_state({"configurable": {"thread_id": str(thread_uuid)}})
             messages = state.values.get("messages", []) if state and state.values else []
         except ValueError:
-            # Graph was compiled without a checkpointer — no persisted state.
+            # Graph compiled without a checkpointer (and none injected).
             messages = []
-
         return messages_to_response_dict(
             messages,
-            conversation_id=conv.id,
-            model=conv.model,
-            created_at=conv.created_at,
+            conversation_id=thread_uuid,
+            model=model,
+            created_at=int(time.time()),
         )
 
     @router.get("/responses/{response_id}/input_items")
     async def list_response_input_items(response_id: str, limit: int = 100):
+        _model, thread_uuid, graph = _resolve(response_id)
         try:
-            conv_uuid = parse_conv_id(response_id)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=openai_error_body(
-                    f"Response {response_id!r} not found",
-                    type="invalid_request_error",
-                    code="response_not_found",
-                ),
-            ) from exc
-
-        try:
-            conv = await store.get(conv_uuid)
-        except ConversationNotFoundError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=openai_error_body(
-                    f"Response {response_id!r} not found",
-                    type="invalid_request_error",
-                    code="response_not_found",
-                ),
-            ) from exc
-
-        # Replay thread state from the checkpointer (same source as get_response).
-        cfg = registry.resolve(conv.model)
-        graph = cfg.graph
-        try:
-            state = await graph.aget_state({"configurable": {"thread_id": str(conv_uuid)}})
+            state = await graph.aget_state({"configurable": {"thread_id": str(thread_uuid)}})
             messages = state.values.get("messages", []) if state and state.values else []
         except ValueError:
             messages = []
@@ -236,19 +198,10 @@ def build_responses_router(
 
     @router.delete("/responses/{response_id}")
     async def delete_response(response_id: str):
-        try:
-            conv_uuid = parse_conv_id(response_id)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=openai_error_body(
-                    f"Response {response_id!r} not found",
-                    type="invalid_request_error",
-                    code="response_not_found",
-                ),
-            ) from exc
-
-        await store.delete(conv_uuid)
+        _model, thread_uuid, graph = _resolve(response_id)
+        checkpointer = getattr(graph, "checkpointer", None)
+        if checkpointer is not None and hasattr(checkpointer, "adelete_thread"):
+            await checkpointer.adelete_thread(str(thread_uuid))
         return {"id": response_id, "object": "response", "deleted": True}
 
     return router

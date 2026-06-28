@@ -45,7 +45,7 @@ from langchain_core.messages import (
 )
 from langchain_core.messages.utils import convert_to_openai_messages
 
-from graphserve._ids import format_conv_id
+from graphserve._ids import format_conv_id, format_resp_id
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +288,7 @@ def messages_to_response_dict(
     ]
     conv_id = format_conv_id(conversation_id)
     return {
-        "id": conv_id,
+        "id": format_resp_id(model, conversation_id),
         "object": "response",
         "created_at": created_at,
         "model": model,
