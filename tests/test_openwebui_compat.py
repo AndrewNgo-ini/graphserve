@@ -310,3 +310,18 @@ def test_stream_with_include_usage_completes():
     })
     assert raw.rstrip().endswith("data: [DONE]")
     assert all(c.get("usage") is None for c in chunks)
+
+
+def test_unknown_model_returns_openai_404():
+    """Requesting an unregistered model returns a 404 with an OpenAI error body."""
+    client = _client("medical", echo_graph())
+    r = client.post("/v1/chat/completions", json={
+        "model": "does-not-exist",
+        "messages": [{"role": "user", "content": "hi"}],
+    })
+    assert r.status_code == 404
+    # FastAPI wraps the handler's detail under "detail".
+    error = r.json()["detail"]["error"]
+    assert error["type"] == "invalid_request_error"
+    assert error["code"] == "model_not_found"
+    assert isinstance(error["message"], str) and error["message"]
