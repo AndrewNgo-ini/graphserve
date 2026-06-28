@@ -210,6 +210,29 @@ def streaming_tool_call_graph():
     return g.compile()
 
 
+def recording_graph():
+    """Graph that records the messages it received, then echoes the last one.
+
+    Returns ``(graph, received)``. After any invoke, ``received["messages"]`` is
+    the full list of LangChain messages the node saw — used to assert that the
+    server forwards the ENTIRE OpenAI ``messages`` array each turn (Open WebUI is
+    stateless toward the backend) with roles mapped to the right message types.
+    """
+    received: dict = {}
+
+    def respond(state: State) -> State:
+        received["messages"] = list(state["messages"])
+        last = state["messages"][-1]
+        text = last.content if isinstance(last.content, str) else str(last.content)
+        return {"messages": [AIMessage(content=f"echo: {text}")]}
+
+    g = StateGraph(State)
+    g.add_node("respond", respond)
+    g.add_edge(START, "respond")
+    g.add_edge("respond", END)
+    return g.compile(), received
+
+
 def streaming_text_graph():
     """Graph whose node *streams* the model so stream_mode='messages' surfaces tokens.
 
