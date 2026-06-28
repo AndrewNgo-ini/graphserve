@@ -206,3 +206,54 @@ def test_task_call_json_content_passthrough():
     assert content == title_json
     # OWUI then json.loads(content) — verify it survives a round trip.
     assert json.loads(content)["title"] == "\U0001F3AF Headache Triage Chat"
+
+
+def _collect_sse(client: TestClient, payload: dict):
+    """POST a streaming chat completion; return (content_type, chunks, raw)."""
+    with client.stream("POST", "/v1/chat/completions", json=payload) as r:
+        content_type = r.headers["content-type"]
+        raw = "".join(r.iter_text())
+    chunks = []
+    for line in raw.splitlines():
+        if line.startswith("data: "):
+            data = line[len("data: "):]
+            if data == "[DONE]":
+                continue
+            chunks.append(json.loads(data))
+    return content_type, chunks, raw
+
+
+def test_streaming_content_type_is_event_stream():
+    """OWUI only streams to the client when content-type is text/event-stream."""
+    client = _client("medical", streaming_text_graph())
+    content_type, _, _ = _collect_sse(client, {
+        "model": "medical",
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": True,
+    })
+    assert content_type.startswith("text/event-stream")
+
+
+def test_streaming_chunk_shape_and_terminator():
+    """SSE chunks match OpenAI chat.completion.chunk; stream ends with [DONE]."""
+    client = _client("medical", streaming_text_graph())
+    _, chunks, raw = _collect_sse(client, {
+        "model": "medical",
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": True,
+    })
+
+    assert raw.rstrip().endswith("data: [DONE]")
+    assert all(c["object"] == "chat.completion.chunk" for c in chunks)
+
+    # First chunk announces the assistant role.
+    assert chunks[0]["choices"][0]["delta"].get("role") == "assistant"
+
+    # Content deltas reconstruct the streamed text.
+    text = "".join(
+        c["choices"][0]["delta"].get("content") or "" for c in chunks
+    )
+    assert text == "hello world"
+
+    # Final chunk carries finish_reason="stop" for a plain text turn.
+    assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
