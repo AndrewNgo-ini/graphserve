@@ -160,3 +160,49 @@ def test_multimodal_content_array_accepted():
     r = client.post("/v1/chat/completions", json=payload)
     assert r.status_code == 200, r.text
     assert isinstance(received["messages"][0], HumanMessage)
+
+
+def test_non_streaming_envelope_owui_fields():
+    """Non-streaming response carries the exact chat.completion fields OWUI reads."""
+    client = _client("medical", echo_graph())
+    r = client.post("/v1/chat/completions", json={
+        "model": "medical",
+        "messages": [{"role": "user", "content": "hi"}],
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["object"] == "chat.completion"
+    assert body["model"] == "medical"
+    assert isinstance(body["id"], str) and body["id"].startswith("chatcmpl-")
+    assert isinstance(body["created"], int)
+    choice = body["choices"][0]
+    assert choice["index"] == 0
+    assert choice["finish_reason"] == "stop"
+    assert choice["message"]["role"] == "assistant"
+    assert isinstance(choice["message"]["content"], str)
+    assert "usage" in body
+
+
+def test_task_call_json_content_passthrough():
+    """A graph returning a JSON-object string (title gen) reaches OWUI verbatim.
+
+    OWUI's title/tags/follow-up task calls parse the content as a JSON object.
+    The bind layer must not wrap, escape, or mutate the assistant content.
+    """
+    title_json = '{"title": "\U0001F3AF Headache Triage Chat"}'
+
+    class TitleGraph:
+        async def ainvoke(self, graph_input, config=None, context=None):
+            return {"messages": [AIMessage(content=title_json)]}
+
+    client = _client("medical", TitleGraph())
+    r = client.post("/v1/chat/completions", json={
+        "model": "medical",
+        "messages": [{"role": "user", "content": "Create a concise title"}],
+        "stream": False,
+    })
+    assert r.status_code == 200
+    content = r.json()["choices"][0]["message"]["content"]
+    assert content == title_json
+    # OWUI then json.loads(content) — verify it survives a round trip.
+    assert json.loads(content)["title"] == "\U0001F3AF Headache Triage Chat"
