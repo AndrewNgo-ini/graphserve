@@ -4,9 +4,9 @@ import pytest
 from graphserve.registry import GraphRegistry, GraphConfig, UnknownModelError
 
 
-def test_graphconfig_is_graph_only():
+def test_graphconfig_fields():
     fields = {f.name for f in dataclasses.fields(GraphConfig)}
-    assert fields == {"graph"}
+    assert fields == {"graph", "streamable_node_names"}
 
 def test_register_and_resolve():
     reg = GraphRegistry()

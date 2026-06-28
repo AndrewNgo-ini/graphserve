@@ -484,6 +484,7 @@ async def emit_response_sse_from_astream(
             item_type="message",
         )
         completed_output: list[dict] = []
+        function_calls: dict[str, _OutputItemState] = {}
 
         async for event in graph.astream(
             graph_input,
@@ -562,6 +563,66 @@ async def emit_response_sse_from_astream(
                     delta=text,
                     logprobs=[],
                 )
+
+            for tcc in getattr(message, "tool_call_chunks", None) or []:
+                key = _tool_call_chunk_key(tcc)
+                fc = function_calls.get(key)
+                if fc is None:
+                    fc = _OutputItemState(
+                        item_id=_new_item_id("fc"),
+                        output_index=builder.allocate_output_index(),
+                        item_type="function_call",
+                        call_id=str(tcc.get("id") or _new_item_id("call")),
+                        name=tcc.get("name") or "",
+                    )
+                    function_calls[key] = fc
+                    yield builder.event(
+                        "response.output_item.added",
+                        output_index=fc.output_index,
+                        item={
+                            "id": fc.item_id,
+                            "type": "function_call",
+                            "call_id": fc.call_id,
+                            "name": fc.name,
+                            "arguments": "",
+                            "status": "in_progress",
+                        },
+                    )
+                else:
+                    fc.call_id = str(tcc.get("id") or fc.call_id)
+                    fc.name = tcc.get("name") or fc.name
+                args_delta = tcc.get("args") or ""
+                if args_delta:
+                    fc.arguments += args_delta
+                    yield builder.event(
+                        "response.function_call_arguments.delta",
+                        item_id=fc.item_id,
+                        output_index=fc.output_index,
+                        delta=args_delta,
+                    )
+
+        for fc in function_calls.values():
+            yield builder.event(
+                "response.function_call_arguments.done",
+                item_id=fc.item_id,
+                output_index=fc.output_index,
+                arguments=fc.arguments,
+                name=fc.name,
+            )
+            fc_item = {
+                "id": fc.item_id,
+                "type": "function_call",
+                "call_id": fc.call_id,
+                "name": fc.name,
+                "arguments": fc.arguments,
+                "status": "completed",
+            }
+            completed_output.append(fc_item)
+            yield builder.event(
+                "response.output_item.done",
+                output_index=fc.output_index,
+                item=fc_item,
+            )
 
         # Finalize message
         if current_message and current_message.output_index != -1:
