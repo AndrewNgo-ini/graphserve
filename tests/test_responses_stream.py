@@ -1,4 +1,6 @@
-from graphserve.translate import emit_response_sse, encode_sse
+from langchain_core.messages import AIMessageChunk
+
+from graphserve.translate import emit_response_sse, emit_response_sse_from_astream, encode_sse
 
 
 async def _drain(events):
@@ -157,3 +159,39 @@ async def test_tool_only_turn_emits_no_message_item():
     # 4. The completed output must contain the function_call item
     fc_items = [item for item in output if item.get("type") == "function_call"]
     assert fc_items, f"Expected function_call item in completed output, got: {output}"
+
+
+# ---------------------------------------------------------------------------
+# response.completed output — astream path (emit_response_sse_from_astream)
+# ---------------------------------------------------------------------------
+
+class _SimpleGraph:
+    """Minimal fake graph yielding a single text AIMessageChunk."""
+
+    async def astream(self, *args, **kwargs):
+        chunk = AIMessageChunk(content="Hello")
+        yield {"type": "messages", "data": (chunk, {"langgraph_node": "model"})}
+
+
+async def test_astream_response_completed_carries_output():
+    """response.completed from emit_response_sse_from_astream must include output.
+
+    Regression: the output array was always empty, causing clients that render
+    from response.completed.output (e.g. OpenWebUI) to discard streamed text.
+    """
+    evts = await _drain(emit_response_sse_from_astream(
+        _SimpleGraph(),
+        {"messages": []},
+        config={},
+        context=None,
+        streamable_node_names=["model"],
+        resp_id="r1",
+        model="m",
+        created_at=1,
+    ))
+    completed = next((e for e in evts if e.event == "response.completed"), None)
+    assert completed is not None, "Missing response.completed event"
+    data = completed.data if isinstance(completed.data, dict) else (completed.data.model_dump() if hasattr(completed.data, "model_dump") else {})
+    output = data.get("response", {}).get("output", [])
+    assert output, "response.completed.response.output must not be empty"
+    assert any(item.get("type") == "message" for item in output)
