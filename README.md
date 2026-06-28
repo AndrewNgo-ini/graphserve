@@ -44,20 +44,18 @@ Your app now exposes:
 | Export | Description |
 |---|---|
 | `GraphRegistry` | Registry mapping model names to graph configs |
-| `GraphConfig` | Holds a single already-compiled `graph` to serve (graph-only) |
+| `GraphConfig` | Holds a single already-compiled `graph` to serve |
 | `create_openai_router` | Builds a FastAPI `APIRouter` with all OpenAI-compatible routes |
-| `ConversationStore` | Protocol for plugging in a custom conversation metadata backend |
 
 ## `create_openai_router` options
 
 ```python
 create_openai_router(
-    registry,          # GraphRegistry — required
-    store=None,        # ConversationStore — defaults to InMemoryConversationStore
+    registry,   # GraphRegistry — required
 )
 ```
 
-GraphServe is a pure bind layer. Cross-cutting concerns are the consumer's job,
+GraphServe is a pure OpenAI↔LangGraph converter. Cross-cutting concerns are the consumer's job,
 applied with standard tools:
 
 - **Auth** — apply it where you mount the router:
@@ -72,10 +70,19 @@ exposed to the graph as LangGraph runtime `context`: `user` → `context["user_i
 `instructions` → `context["metadata"]["custom_instructions"]`, and `metadata` is
 passed through as `context["metadata"]`. Graphs read what they need and ignore the rest.
 
-> **Stateful GET / `previous_response_id` continuity** requires the registered
-> graph to be compiled with a LangGraph checkpointer — this is the consumer's
-> responsibility (e.g. `graph.compile(checkpointer=MemorySaver())`).
-> GraphServe reads thread state via `graph.aget_state(...)` at GET time.
+## Stateful responses and `previous_response_id`
+
+All state is managed through the registered graph's LangGraph checkpointer, keyed by `thread_id`.
+If a graph is compiled without a checkpointer, GraphServe automatically injects an `InMemorySaver`
+(with a warning). Response IDs encode the model (`resp_<model>.<hex>`) so GET/DELETE routes can
+resolve the owning graph without any external metadata store.
+
+To use a persistent checkpointer:
+
+```python
+from langgraph.checkpoint.memory import MemorySaver
+compiled = graph.compile(checkpointer=MemorySaver())
+```
 
 ## Streaming
 
