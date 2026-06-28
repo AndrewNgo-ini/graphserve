@@ -257,3 +257,56 @@ def test_streaming_chunk_shape_and_terminator():
 
     # Final chunk carries finish_reason="stop" for a plain text turn.
     assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
+
+
+def test_extra_openai_params_tolerated():
+    """OWUI-forwarded OpenAI params not in graphserve's schema are ignored, not rejected."""
+    client = _client("medical", echo_graph())
+    r = client.post("/v1/chat/completions", json={
+        "model": "medical",
+        "messages": [{"role": "user", "content": "hi"}],
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "n": 1,
+        "stop": ["\n\n"],
+        "max_tokens": 256,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0,
+        "seed": 42,
+        "response_format": {"type": "json_object"},
+        "tools": [{"type": "function", "function": {"name": "noop", "parameters": {}}}],
+        "tool_choice": "auto",
+        "stream_options": {"include_usage": True},
+    })
+    assert r.status_code == 200, r.text
+
+
+def test_authorization_header_does_not_break():
+    """OWUI sends Authorization: Bearer <key>; graphserve has no auth and must 200."""
+    client = _client("medical", echo_graph())
+    r = client.post(
+        "/v1/chat/completions",
+        json={"model": "medical", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer sk-owui-test-key"},
+    )
+    assert r.status_code == 200
+
+
+def test_stream_with_include_usage_completes():
+    """stream_options.include_usage must not break streaming.
+
+    KNOWN GAP: graphserve does not emit a trailing usage-only chunk that the
+    OpenAI spec defines for include_usage=True. OWUI tolerates its absence (usage
+    display is best-effort). This test pins current behavior: the stream still
+    completes with [DONE] and no chunk reports usage. If graphserve later emits a
+    usage chunk, update this assertion deliberately.
+    """
+    client = _client("medical", streaming_text_graph())
+    _, chunks, raw = _collect_sse(client, {
+        "model": "medical",
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    })
+    assert raw.rstrip().endswith("data: [DONE]")
+    assert all(c.get("usage") is None for c in chunks)
