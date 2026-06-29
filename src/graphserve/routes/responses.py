@@ -145,9 +145,19 @@ def build_responses_router(registry: GraphRegistry) -> APIRouter:
             )
 
         # 4b. Non-streaming path
+        # Track initial message count to extract only new messages from this turn
+        try:
+            initial_state = await graph.aget_state({"configurable": {"thread_id": str(thread_uuid)}})
+            initial_message_count = len(initial_state.values.get("messages", []) or []) if initial_state else 0
+        except (ValueError, AttributeError):
+            initial_message_count = 0
+
         result = await graph.ainvoke(graph_input, config=run_config, context=context)
+        all_messages = result.get("messages", []) if isinstance(result, dict) else []
+        # Extract only the new messages generated in this turn (not full conversation history)
+        new_messages = all_messages[initial_message_count:] if initial_message_count < len(all_messages) else all_messages
         return messages_to_response_dict(
-            result.get("messages", []) if isinstance(result, dict) else [],
+            new_messages,
             conversation_id=thread_uuid,
             model=request.model,
             created_at=created_at,
