@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from graphserve import GraphRegistry, GraphConfig, create_openai_router
+from graphserve import GraphRegistry, create_openai_router
 from tests.fakes import echo_graph, echo_graph_with_checkpointer
 
 
@@ -8,7 +8,7 @@ from tests.fakes import echo_graph, echo_graph_with_checkpointer
 
 def _client():
     reg = GraphRegistry()
-    reg.register("medical", GraphConfig(graph=echo_graph()))
+    reg.register("medical", echo_graph())
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     return TestClient(app)
@@ -83,7 +83,7 @@ def test_structured_block_input():
 
 def _ckpt_client():
     reg = GraphRegistry()
-    reg.register("medical", GraphConfig(graph=echo_graph_with_checkpointer()))
+    reg.register("medical", echo_graph_with_checkpointer())
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     return TestClient(app)
@@ -139,7 +139,7 @@ def test_responses_metadata_reaches_graph_context():
             return {"messages": [AIMessage(content="ok")]}
 
     reg = GraphRegistry()
-    reg.register("meta-resp-model", GraphConfig(graph=FakeGraph()))
+    reg.register("meta-resp-model", FakeGraph())
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     client = TestClient(app)

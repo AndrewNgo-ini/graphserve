@@ -11,13 +11,13 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import (
     AIMessage, HumanMessage, SystemMessage, ToolMessage,
 )
-from graphserve import GraphRegistry, GraphConfig, create_openai_router
+from graphserve import GraphRegistry, create_openai_router
 from tests.fakes import echo_graph, streaming_text_graph, recording_graph, internal_tool_graph
 
 
 def _client(model: str, graph) -> TestClient:
     reg = GraphRegistry()
-    reg.register(model, GraphConfig(graph=graph))
+    reg.register(model, graph)
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     return TestClient(app)
@@ -30,8 +30,8 @@ def test_models_list_shape_owui_parses():
     each item's ["id"]. Registered model names must appear as ids.
     """
     reg = GraphRegistry()
-    reg.register("medical", GraphConfig(graph=echo_graph()))
-    reg.register("triage", GraphConfig(graph=echo_graph()))
+    reg.register("medical", echo_graph())
+    reg.register("triage", echo_graph())
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     client = TestClient(app)

@@ -1,6 +1,6 @@
 [project]
 name = "graphserve"
-version = "0.1.2"
+version = "0.2.0"
 description = "Serve any LangGraph graph over the OpenAI Chat Completions + Responses APIs."
 readme = "README.md"
 requires-python = ">=3.11"

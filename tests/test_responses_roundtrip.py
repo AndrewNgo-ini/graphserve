@@ -1,13 +1,13 @@
 """End-to-end roundtrip tests: tool-call streaming + GET-after-create."""
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from graphserve import GraphRegistry, GraphConfig, create_openai_router
+from graphserve import GraphRegistry, create_openai_router
 from tests.fakes import echo_graph, echo_graph_with_checkpointer, plain_text_llm_graph, tool_then_text_graph
 
 
 def _client(graph):
     reg = GraphRegistry()
-    reg.register("m", GraphConfig(graph=graph))
+    reg.register("m", graph)
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     return TestClient(app)

@@ -1,13 +1,13 @@
 """Tests for POST /chat/completions — non-streaming and streaming."""
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from graphserve import GraphRegistry, GraphConfig, create_openai_router
+from graphserve import GraphRegistry, create_openai_router
 from tests.fakes import echo_graph, echo_graph_with_checkpointer
 
 
 def _client():
     reg = GraphRegistry()
-    reg.register("medical", GraphConfig(graph=echo_graph()))
+    reg.register("medical", echo_graph())
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     return TestClient(app)
@@ -55,7 +55,7 @@ def test_chat_non_streaming_returns_last_message_text():
             ]}
 
     reg = GraphRegistry()
-    reg.register("custom", GraphConfig(graph=FakeGraph()))
+    reg.register("custom", FakeGraph())
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     client = TestClient(app)
@@ -85,7 +85,7 @@ def test_chat_metadata_reaches_graph_context():
             return {"messages": [AIMessage(content="ok")]}
 
     reg = GraphRegistry()
-    reg.register("meta-model", GraphConfig(graph=FakeGraph()))
+    reg.register("meta-model", FakeGraph())
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     client = TestClient(app)
@@ -122,7 +122,7 @@ def test_chat_conversation_id_same_thread_no_error():
     MemorySaver checkpointer and state is preserved across calls.
     """
     reg = GraphRegistry()
-    reg.register("threaded", GraphConfig(graph=echo_graph_with_checkpointer()))
+    reg.register("threaded", echo_graph_with_checkpointer())
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     client = TestClient(app)
@@ -152,7 +152,7 @@ def test_chat_conversation_id_same_thread_no_error():
 def test_chat_different_conversation_ids_are_independent():
     """Two calls with different conversation_ids use separate threads."""
     reg = GraphRegistry()
-    reg.register("threaded2", GraphConfig(graph=echo_graph_with_checkpointer()))
+    reg.register("threaded2", echo_graph_with_checkpointer())
     app = FastAPI()
     app.include_router(create_openai_router(reg), prefix="/v1")
     client = TestClient(app)

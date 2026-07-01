@@ -9,14 +9,9 @@ class UnknownModelError(KeyError):
 
 
 @dataclass
-class GraphConfig:
-    """An already-compiled graph to serve.
-
-    ``graph`` must be an already-compiled graph — GraphServe never constructs
-    it. Build/compile the graph in your application and pass it in. Per-request
-    concerns (runtime context, callbacks, output extraction) are handled
-    generically by GraphServe, not per graph.
-    """
+class _Registered:
+    """Internal record. ``graph`` must be an already-compiled graph —
+    GraphServe never constructs it."""
 
     graph: Any
     streamable_node_names: list[str] | None = None
@@ -24,14 +19,20 @@ class GraphConfig:
 
 class GraphRegistry:
     def __init__(self) -> None:
-        self._configs: dict[str, GraphConfig] = {}
+        self._configs: dict[str, _Registered] = {}
 
-    def register(self, model_name: str, config: GraphConfig) -> None:
+    def register(
+        self,
+        model_name: str,
+        graph: Any,
+        *,
+        streamable_node_names: list[str] | None = None,
+    ) -> None:
         if model_name in self._configs:
             raise ValueError(f"Model {model_name!r} already registered")
-        self._configs[model_name] = config
+        self._configs[model_name] = _Registered(graph, streamable_node_names)
 
-    def resolve(self, model_name: str) -> GraphConfig:
+    def resolve(self, model_name: str) -> _Registered:
         try:
             return self._configs[model_name]
         except KeyError:

@@ -26,7 +26,7 @@ from openai.types.responses import (
     ResponseTextDoneEvent,
 )
 
-from graphserve import GraphConfig, GraphRegistry, create_openai_router
+from graphserve import GraphRegistry, create_openai_router
 from tests.fakes import (
     plain_text_llm_graph,
     streaming_text_graph,
@@ -40,7 +40,7 @@ from tests.fakes import (
 async def sdk_client(name: str, graph):
     """Yield an openai.AsyncOpenAI bound to a GraphServe app for *graph*, in-process."""
     registry = GraphRegistry()
-    registry.register(name, GraphConfig(graph=graph))
+    registry.register(name, graph)
     app = FastAPI()
     app.include_router(create_openai_router(registry), prefix="/v1")
     async with httpx.AsyncClient(
