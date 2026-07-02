@@ -15,7 +15,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
-from graphserve.translate import (
+from graphserve.adapters import (
     emit_response_sse,
     emit_response_sse_from_astream,
     lc_messages_to_openai_items,

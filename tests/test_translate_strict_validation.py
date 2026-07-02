@@ -7,7 +7,7 @@ import uuid
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from openai.types.responses import Response
 
-from graphserve.translate import messages_to_response_dict
+from graphserve.adapters import messages_to_response_dict
 
 
 def _validate(messages):

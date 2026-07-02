@@ -22,7 +22,7 @@ from graphserve._ids import (
 )
 from graphserve.errors import openai_error_body
 from graphserve.registry import GraphRegistry, UnknownModelError
-from graphserve.translate import (
+from graphserve.adapters import (
     encode_sse,
     emit_response_sse_from_astream,
     extract_text,

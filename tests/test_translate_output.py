@@ -1,6 +1,6 @@
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from graphserve.translate import result_to_text
+from graphserve.adapters import result_to_text
 
 
 def test_last_ai_message_text():

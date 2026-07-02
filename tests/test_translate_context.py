@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from graphserve.translate import request_to_context
+from graphserve.adapters import request_to_context
 
 
 def test_context_carries_user_and_metadata():

@@ -1,6 +1,6 @@
 from langchain_core.messages import AIMessageChunk
 
-from graphserve.translate import emit_response_sse, emit_response_sse_from_astream, encode_sse
+from graphserve.adapters import emit_response_sse, emit_response_sse_from_astream, encode_sse
 
 
 async def _drain(events):

@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from graphserve.errors import openai_error_body
 from graphserve.registry import GraphRegistry, UnknownModelError
-from graphserve.translate import chat_completion_chunks, request_to_context, result_to_text
+from graphserve.adapters import chat_completion_chunks, request_to_context, result_to_text
 
 
 def _openai_tool_calls(message: AIMessage | None) -> list[dict]:

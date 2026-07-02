@@ -1,6 +1,6 @@
 import uuid
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from graphserve.translate import extract_text, lc_messages_to_openai_items, messages_to_response_dict
+from graphserve.adapters import extract_text, lc_messages_to_openai_items, messages_to_response_dict
 
 def test_extract_text_str():
     assert extract_text("hi") == "hi"

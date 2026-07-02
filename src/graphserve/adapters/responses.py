@@ -1,4 +1,9 @@
-"""Adapters between LangChain messages and OpenAI Responses API item dicts."""
+"""Adapters between LangChain messages and the OpenAI Responses API.
+
+Covers both directions:
+  - checkpoint messages -> Responses item dicts / non-streaming payload
+  - LangGraph streams -> Responses-API SSE events
+"""
 
 from __future__ import annotations
 
@@ -13,13 +18,6 @@ from uuid import UUID
 
 from fastapi.encoders import jsonable_encoder
 from fastapi.sse import ServerSentEvent, format_sse_event
-from openai.types.chat.chat_completion_chunk import (
-    ChatCompletionChunk,
-    Choice as ChunkChoice,
-    ChoiceDelta,
-    ChoiceDeltaToolCall,
-    ChoiceDeltaToolCallFunction,
-)
 from openai.types.responses import (
     ResponseCompletedEvent,
     ResponseContentPartAddedEvent,
@@ -46,31 +44,9 @@ from langchain_core.messages import (
 from langchain_core.messages.utils import convert_to_openai_messages
 
 from graphserve._ids import format_conv_id, format_resp_id
+from graphserve.adapters.common import extract_text
 
-
-# ---------------------------------------------------------------------------
-# Public text extractor
-# ---------------------------------------------------------------------------
-
-def extract_text(content: Any) -> str:
-    """Extract plain text from a string or list of content blocks.
-
-    Handles ``str`` directly and lists of dicts with ``type`` in
-    ``{"text", "output_text", "input_text"}``.  All other block types are
-    silently ignored.
-    """
-    if isinstance(content, str):
-        return content
-    parts: list[str] = []
-    if isinstance(content, list):
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict):
-                block_type = block.get("type", "")
-                if block_type in ("text", "output_text", "input_text"):
-                    parts.append(block.get("text", ""))
-    return "".join(parts)
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -209,48 +185,8 @@ def _lc_messages_to_items(messages: list[BaseMessage]) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Public conversion API
 # ---------------------------------------------------------------------------
-
-def result_to_text(result: Any) -> str:
-    """Extract the response text from a LangGraph result dict.
-
-    Uses the LAST message's text content. This is correct for a normal turn
-    (trailing assistant message) and for ``return_direct`` tools (trailing
-    tool message whose content IS the response).
-    """
-    messages = result.get("messages", []) if isinstance(result, dict) else []
-    if not messages:
-        return ""
-    return extract_text(messages[-1].content)
-
-
-def request_to_context(request: Any) -> dict | None:
-    """Build LangGraph runtime context from an OpenAI request, generically.
-
-    Maps the standard OpenAI request fields onto a context envelope every
-    graph's middleware can read:
-      - ``user`` -> ``context["user_id"]``
-      - ``instructions`` (Responses API) -> ``context["metadata"]["custom_instructions"]``
-      - ``metadata`` -> ``context["metadata"]`` (passed through verbatim)
-
-    Returns ``None`` when the request carries none of these, so the graph runs
-    with no runtime context.
-    """
-    metadata: dict[str, Any] = dict(getattr(request, "metadata", None) or {})
-    instructions = getattr(request, "instructions", None)
-    if instructions:
-        metadata["custom_instructions"] = instructions
-
-    context: dict[str, Any] = {}
-    user = getattr(request, "user", None)
-    if user:
-        context["user_id"] = user
-    if metadata:
-        context["metadata"] = metadata
-
-    return context or None
-
 
 def lc_messages_to_openai_items(messages: list[BaseMessage]) -> list[dict]:
     """Convert LangChain messages to OpenAI Responses API item dicts.
@@ -302,10 +238,8 @@ def messages_to_response_dict(
 
 
 # ---------------------------------------------------------------------------
-# Responses-API SSE streaming
+# SSE streaming
 # ---------------------------------------------------------------------------
-
-logger = logging.getLogger(__name__)
 
 _EVENT_MODELS: dict[str, type[Any]] = {
     "response.created": ResponseCreatedEvent,
@@ -470,8 +404,6 @@ async def emit_response_sse_from_astream(
     Uses astream with stream_mode=["messages"] to get AIMessageChunk updates,
     then converts them to Responses API SSE format.
     """
-    from langchain_core.messages import AIMessageChunk
-
     builder = _ResponseEventBuilder(resp_id=resp_id, model=model, created_at=created_at)
 
     yield builder.event("response.created", response=builder.response("in_progress"))
@@ -961,95 +893,3 @@ async def emit_response_sse(
             "response.completed",
             response=builder.response("completed", output=completed_output),
         )
-
-
-# ---------------------------------------------------------------------------
-# Chat Completions chunk stream
-# ---------------------------------------------------------------------------
-
-async def chat_completion_chunks(
-    message_stream: AsyncIterable[tuple],
-    *,
-    completion_id: str,
-    model: str,
-    created: int,
-) -> AsyncIterator[bytes]:
-    """Translate a LangGraph ``stream_mode="messages"`` stream to Chat Completions SSE.
-
-    ``message_stream`` is an async iterable of ``(msg_chunk, metadata)`` tuples
-    already filtered to the ``"messages"`` stream mode by the caller.  No
-    ``astream`` call is made inside this function.
-
-    Yields ``data: {...}\\n\\n`` bytes, ending with the ``finish_reason="stop"``
-    chunk and then ``data: [DONE]\\n\\n``.
-
-    ``created`` is an epoch-seconds integer supplied by the caller; no
-    ``time.time()`` is called inside this function.
-    """
-    # Leading role chunk
-    role_chunk = ChatCompletionChunk(
-        id=completion_id,
-        object="chat.completion.chunk",
-        created=created,
-        model=model,
-        choices=[ChunkChoice(index=0, delta=ChoiceDelta(role="assistant"), finish_reason=None)],
-    )
-    yield f"data: {role_chunk.model_dump_json()}\n\n".encode()
-
-    def _chunk(delta: ChoiceDelta, finish_reason: str | None = None) -> bytes:
-        chunk = ChatCompletionChunk(
-            id=completion_id,
-            object="chat.completion.chunk",
-            created=created,
-            model=model,
-            choices=[ChunkChoice(index=0, delta=delta, finish_reason=finish_reason)],
-        )
-        return f"data: {chunk.model_dump_json()}\n\n".encode()
-
-    # Per-chunk content + tool-call deltas.
-    # pending_tool_call: True while the current model turn is emitting tool calls
-    # with no subsequent text. Reset to False when text arrives after a tool call
-    # so that internal tool use (model calls tool → gets result → replies with text)
-    # ends with finish_reason="stop" rather than "tool_calls".
-    pending_tool_call = False
-    tool_index: dict[str, int] = {}
-    next_index = 0
-    async for msg_chunk, _metadata in message_stream:
-        if not isinstance(msg_chunk, AIMessageChunk):
-            continue
-
-        text_content = extract_text(msg_chunk.content) if msg_chunk.content else ""
-        if text_content:
-            pending_tool_call = False  # text after a tool call → agent handled it
-            yield _chunk(ChoiceDelta(content=text_content))
-
-        for tcc in getattr(msg_chunk, "tool_call_chunks", None) or []:
-            pending_tool_call = True
-            # OpenAI deltas correlate fragments by a stable integer index. Use the
-            # chunk's own index when present; otherwise assign one per call id.
-            idx = tcc.get("index")
-            if idx is None:
-                key = tcc.get("id") or f"_pos{next_index}"
-                idx = tool_index.setdefault(key, next_index)
-                if idx == next_index:
-                    next_index += 1
-            else:
-                next_index = max(next_index, idx + 1)
-            call_id = tcc.get("id")
-            yield _chunk(ChoiceDelta(tool_calls=[ChoiceDeltaToolCall(
-                index=idx,
-                id=call_id or None,
-                type="function" if call_id else None,
-                function=ChoiceDeltaToolCallFunction(
-                    name=tcc.get("name") or None,
-                    arguments=tcc.get("args") or "",
-                ),
-            )]))
-
-    # finish_reason="tool_calls" only when the stream ended mid-tool-call
-    # (i.e. the client is expected to execute the tool). If the agent handled
-    # the tool internally and produced final text, finish with "stop".
-    yield _chunk(ChoiceDelta(), finish_reason="tool_calls" if pending_tool_call else "stop")
-
-    # SSE terminator
-    yield b"data: [DONE]\n\n"

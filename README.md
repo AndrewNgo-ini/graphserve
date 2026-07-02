@@ -99,10 +99,54 @@ job, applied with standard tools:
 
 ### Runtime context passed to your graph
 
-Per-request context is derived generically from the OpenAI request and exposed to the graph
-as LangGraph runtime `context`: `user` → `context["user_id"]`, `instructions` →
-`context["metadata"]["custom_instructions"]`, and `metadata` is passed through as
-`context["metadata"]`. Graphs read what they need and ignore the rest.
+Different graphs need different per-request information — a caller's identity, a tenant ID,
+a turn counter, feature flags, custom instructions. GraphServe does **not** invent a bespoke
+field per use case. Instead it maps the standard OpenAI request fields onto a single LangGraph
+runtime `context` envelope, and gives you one open-ended channel (`metadata`) for everything else:
+
+| OpenAI request field | Becomes | Notes |
+|---|---|---|
+| `user` | `context["user_id"]` | The standard OpenAI end-user identifier. |
+| `instructions` (Responses API) | `context["metadata"]["custom_instructions"]` | Folded into metadata so graphs read it in one place. |
+| `metadata` (arbitrary key/values) | `context["metadata"]` | **Passed through verbatim** — your extension point. |
+
+If the request carries none of these, `context` is `None` and the graph runs with no runtime
+context. The `context` dict is handed to LangGraph via `ainvoke(..., context=...)` /
+`astream(..., context=...)`, so your nodes and middleware read it as normal runtime context.
+
+**The `metadata` field is the mechanism for any new use case.** Anything a client puts there
+arrives unchanged at `context["metadata"]` — no GraphServe change required. For example, a
+client sends:
+
+```json
+{
+  "model": "my-agent",
+  "input": "…",
+  "user": "user-42",
+  "metadata": {
+    "identity_number": "VN001",
+    "turn_number": 2,
+    "tenant": "clinic-7"
+  }
+}
+```
+
+and a node reads it off the runtime context:
+
+```python
+from langgraph.runtime import get_runtime
+
+def my_node(state):
+    ctx = get_runtime().context or {}
+    user_id = ctx.get("user_id")                       # "user-42"
+    meta = ctx.get("metadata", {})
+    identity = meta.get("identity_number")             # "VN001"
+    turn = meta.get("turn_number")                     # 2
+    ...
+```
+
+Graphs read what they need and ignore the rest, so adding a new field is a client-side change
+only — it never requires touching GraphServe.
 
 ## Stateful responses and `previous_response_id`
 

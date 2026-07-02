@@ -1,5 +1,5 @@
 from langchain_core.messages import AIMessageChunk
-from graphserve.translate import chat_completion_chunks
+from graphserve.adapters import chat_completion_chunks
 
 
 async def _stream():
